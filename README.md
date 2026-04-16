@@ -11,7 +11,7 @@
 + Qt Designer
 
 ## Aprensentação do Projeto
-Link: https://bit.ly/PyStockVideo
+Link: 
 
 ## Documentação
 <a href="https://github.com/GeovaniTech/PyStock_controle_de_estoque/blob/main/Como%20rodar%20o%20PyStock.md" target="_blank">Como Rodar o Projeto</a>
