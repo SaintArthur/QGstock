@@ -1,32 +1,40 @@
 import cx_Freeze
-import os
-import sys
 
 executables = [
     cx_Freeze.Executable(
-        script='PyStock - App.py', 
-        icon='View/Imagens/Logo Ico.ico', 
-        base='Win32GUI'
+        script="app.py",
+        icon="View/Imagens/Logo Ico.ico",
+        base="Win32GUI",
+        target_name="QGstock.exe",
     )
 ]
 
 cx_Freeze.setup(
-    name="PyStock",
-    version="1.0",
-    description="Aplicativo PyStock",
+    name="QGstock",
+    version="2.0",
+    description="Sistema de Controle de Estoque QGstock",
     options={
-        'build_exe': {
-            'packages': [
-                'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 
-                'mysql.connector', 'os', 'sys', 
-                'openpyxl.drawing.image', 'datetime', 'time', 
-                'tkinter.filedialog', 'openpyxl'
+        "build_exe": {
+            "packages": [
+                "PyQt5.QtCore",
+                "PyQt5.QtGui",
+                "PyQt5.QtWidgets",
+                "mysql.connector",
+                "openpyxl",
+                "openpyxl.drawing.image",
+                "csv",
+                "hashlib",
+                "datetime",
             ],
-            'include_files': [
-                'View/',  # Inclui a pasta com subpastas.
-                'Base xls.xlsx'  # Inclui o arquivo Excel.
-            ] 
+            "include_files": [
+                "View/",
+                "config.py",
+                "database.py",
+                "views/",
+                "utils/",
+            ],
+            "excludes": ["tkinter"],
         }
     },
-    executables=executables
+    executables=executables,
 )

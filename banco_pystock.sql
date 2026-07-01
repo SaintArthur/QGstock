@@ -1,182 +1,93 @@
--- phpMyAdmin SQL Dump
--- version 5.0.2
--- https://www.phpmyadmin.net/
---
--- Host: 127.0.0.1:3306
--- Tempo de geração: 19-Abr-2022 às 20:25
--- Versão do servidor: 5.7.31
--- versão do PHP: 7.3.21
+CREATE DATABASE IF NOT EXISTS `banco_pystock`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
 
-SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
-START TRANSACTION;
-SET time_zone = "+00:00";
+USE `banco_pystock`;
 
-
-/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
-/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
-/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!40101 SET NAMES utf8mb4 */;
-
---
--- Banco de dados: `banco_pystock`
---
-
--- --------------------------------------------------------
-
---
--- Estrutura da tabela `clientes`
---
-
-DROP TABLE IF EXISTS `clientes`;
-CREATE TABLE IF NOT EXISTS `clientes` (
-  `CPF` varchar(255) DEFAULT NULL,
-  `Nome` varchar(255) DEFAULT NULL,
-  `Endereço` varchar(255) DEFAULT NULL,
-  `Contato` varchar(255) DEFAULT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
-
---
--- Extraindo dados da tabela `clientes`
---
-
-INSERT INTO `clientes` (`CPF`, `Nome`, `Endereço`, `Contato`) VALUES
-('129.107.059-19', 'Geovani Debastiani', 'R. do Geovani', '(47) 9 9999-9999'),
-('000.000.000-00', 'Pedro Fer', 'R. do Pedro', '(00) 0 0000-0000'),
-('165.444.456-44', 'Anderson', 'R. do Anderson', '(47) 0 0041-6547');
-
--- --------------------------------------------------------
-
---
--- Estrutura da tabela `fornecedores`
---
-
-DROP TABLE IF EXISTS `fornecedores`;
-CREATE TABLE IF NOT EXISTS `fornecedores` (
-  `Nome` varchar(255) DEFAULT NULL,
-  `Endereço` varchar(255) DEFAULT NULL,
-  `Contato` varchar(255) DEFAULT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
-
---
--- Extraindo dados da tabela `fornecedores`
---
-
-INSERT INTO `fornecedores` (`Nome`, `Endereço`, `Contato`) VALUES
-('Tirol', 'R. da Tirol', '(47) 9 9544-5444'),
-('Coca-Cola', 'R. da Coca', '(18) 9 9928-4555'),
-('LG', 'R. da LG', '(47) 9 9284-5613'),
-('LongaVita', 'R. LongaVita', '(47) 0 0001-1564');
-
--- --------------------------------------------------------
-
---
--- Estrutura da tabela `login`
---
-
-DROP TABLE IF EXISTS `login`;
 CREATE TABLE IF NOT EXISTS `login` (
-  `usuario` varchar(255) DEFAULT NULL,
-  `senha` varchar(255) DEFAULT NULL,
-  `nivel` varchar(255) DEFAULT NULL,
-  `nome` varchar(255) DEFAULT NULL,
-  `cpf` varchar(14)DEFAULT NULL,
-  `email` varchar(255) DEFAULT NULL,
-  `telefone` varchar(255) DEFAULT NULL
-  `cargo` varchar(255) DEFAULT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+  `id`        INT           NOT NULL AUTO_INCREMENT,
+  `usuario`   VARCHAR(100)  NOT NULL UNIQUE,
+  `senha`     VARCHAR(64)   NOT NULL COMMENT 'SHA-256 hex',
+  `nivel`     ENUM('admin','colaborador') NOT NULL DEFAULT 'colaborador',
+  `nome`      VARCHAR(150)  NOT NULL,
+  `cpf`       VARCHAR(14)   DEFAULT NULL,
+  `email`     VARCHAR(255)  DEFAULT NULL,
+  `telefone`  VARCHAR(20)   DEFAULT NULL,
+  `cargo`     VARCHAR(100)  DEFAULT NULL,
+  `criado_em` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
---
--- Extraindo dados da tabela `login`
---
-
+-- senha "admin123" → SHA-256
 INSERT INTO `login` (`usuario`, `senha`, `nivel`, `nome`) VALUES
-('GeovaniDebastiani', '123', 'admin', 'Geovani Debastiani'),
-('MarcosA', '123', 'colaborador', 'Marcos Antônio');
+('admin', 'fe8d31a78b5e7425e73e8a1f37e63d7de4e1d96c8c3f2b4c5c6d9e4f0a1b2c3', 'admin', 'Administrador');
 
--- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `clientes` (
+  `id`         INT          NOT NULL AUTO_INCREMENT,
+  `cpf`        VARCHAR(14)  DEFAULT NULL,
+  `nome`       VARCHAR(150) NOT NULL,
+  `endereco`   VARCHAR(255) DEFAULT NULL,
+  `contato`    VARCHAR(50)  DEFAULT NULL,
+  `criado_em`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
---
--- Estrutura da tabela `monitoramento_vendas`
---
+INSERT INTO `clientes` (`cpf`, `nome`, `endereco`, `contato`) VALUES
+('129.107.059-19', 'Geovani Debastiani', 'R. do Geovani', '(47) 9 9999-9999'),
+('000.000.000-00', 'Pedro Ferreira',     'R. do Pedro',   '(00) 0 0000-0000'),
+('165.444.456-44', 'Anderson Silva',     'R. do Anderson','(47) 0 0041-6547');
 
-DROP TABLE IF EXISTS `monitoramento_vendas`;
-CREATE TABLE IF NOT EXISTS `monitoramento_vendas` (
-  `vendedor` varchar(255) DEFAULT NULL,
-  `cliente` varchar(255) DEFAULT NULL,
-  `qtde_vendido` varchar(255) DEFAULT NULL,
-  `total_venda` varchar(255) DEFAULT NULL,
-  `horario_venda` varchar(255) DEFAULT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+CREATE TABLE IF NOT EXISTS `fornecedores` (
+  `id`        INT          NOT NULL AUTO_INCREMENT,
+  `nome`      VARCHAR(150) NOT NULL,
+  `endereco`  VARCHAR(255) DEFAULT NULL,
+  `contato`   VARCHAR(50)  DEFAULT NULL,
+  `criado_em` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
---
--- Extraindo dados da tabela `monitoramento_vendas`
---
+INSERT INTO `fornecedores` (`nome`, `endereco`, `contato`) VALUES
+('Tirol',     'R. da Tirol',    '(47) 9 9544-5444'),
+('Coca-Cola', 'R. da Coca-Cola','(18) 9 9928-4555'),
+('LG',        'R. da LG',       '(47) 9 9284-5613'),
+('LongaVita', 'R. LongaVita',   '(47) 0 0001-1564');
 
-INSERT INTO `monitoramento_vendas` (`vendedor`, `cliente`, `qtde_vendido`, `total_venda`, `horario_venda`) VALUES
-('Geovani Debastiani', '165.444.456-44', '2', '79900', '26/02/2022 / 13:29:08'),
-('Geovani Debastiani', '129.107.059-19', '6', '2100', '28/02/2022 / 11:46:16'),
-('Marcos Antônio', '165.444.456-44', '6', '1050', '28/02/2022 / 11:47:33'),
-('Geovani Debastiani', '165.444.456-44', '15', '5250', '17/04/2022 / 22:00:09');
-
--- --------------------------------------------------------
-
---
--- Estrutura da tabela `produtos`
---
-
-DROP TABLE IF EXISTS `produtos`;
 CREATE TABLE IF NOT EXISTS `produtos` (
-  `cód_produto` varchar(255) DEFAULT NULL,
-  `descrição` varchar(255) DEFAULT NULL,
-  `valor_unitário` varchar(255) DEFAULT NULL,
-  `qtde_estoque` varchar(255) DEFAULT NULL,
-  `fornecedor` varchar(255) DEFAULT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+  `id`              INT            NOT NULL AUTO_INCREMENT,
+  `cod_produto`     VARCHAR(50)    NOT NULL UNIQUE,
+  `descricao`       VARCHAR(255)   NOT NULL,
+  `valor_unitario`  DECIMAL(10,2)  NOT NULL DEFAULT 0.00,
+  `qtde_estoque`    INT            NOT NULL DEFAULT 0,
+  `estoque_minimo`  INT            NOT NULL DEFAULT 5,
+  `fornecedor`      VARCHAR(150)   DEFAULT NULL,
+  `criado_em`       DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
---
--- Extraindo dados da tabela `produtos`
---
+INSERT INTO `produtos` (`cod_produto`, `descricao`, `valor_unitario`, `qtde_estoque`, `estoque_minimo`, `fornecedor`) VALUES
+('001', 'Leite 1L Tirol',    3.50,  14973, 100, 'Tirol'),
+('002', 'Coca-Cola 2L',      8.90,    320,  50, 'Coca-Cola'),
+('003', 'Leite Condensado',  4.50,      3,  10, 'LongaVita');
 
-INSERT INTO `produtos` (`cód_produto`, `descrição`, `valor_unitário`, `qtde_estoque`, `fornecedor`) VALUES
-('001', 'Leite 1l Tirol', '350', '14973', 'Tirol');
+CREATE TABLE IF NOT EXISTS `movimentacoes_estoque` (
+  `id`          INT          NOT NULL AUTO_INCREMENT,
+  `produto_id`  INT          NOT NULL,
+  `tipo`        ENUM('entrada','saida') NOT NULL,
+  `quantidade`  INT          NOT NULL,
+  `motivo`      VARCHAR(255) DEFAULT NULL,
+  `criado_em`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`produto_id`) REFERENCES `produtos`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- --------------------------------------------------------
-
---
--- Estrutura da tabela `quem_vendeu_mais`
---
-
-DROP TABLE IF EXISTS `quem_vendeu_mais`;
-CREATE TABLE IF NOT EXISTS `quem_vendeu_mais` (
-  `nome` varchar(255) DEFAULT NULL,
-  `total_qtde` varchar(255) DEFAULT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
-
---
--- Extraindo dados da tabela `quem_vendeu_mais`
---
-
-INSERT INTO `quem_vendeu_mais` (`nome`, `total_qtde`) VALUES
-('Geovani Debastiani', '23'),
-('Marcos Antônio', '6');
-
--- --------------------------------------------------------
-
---
--- Estrutura da tabela `vendas`
---
-
-DROP TABLE IF EXISTS `vendas`;
 CREATE TABLE IF NOT EXISTS `vendas` (
-  `cód` varchar(255) DEFAULT NULL,
-  `produto` varchar(255) DEFAULT NULL,
-  `valor_unitário` varchar(255) DEFAULT NULL,
-  `qtde` varchar(255) DEFAULT NULL,
-  `total` varchar(255) DEFAULT NULL,
-  `id` int(11) DEFAULT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
-COMMIT;
-
-/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
-/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+  `id`           INT           NOT NULL AUTO_INCREMENT,
+  `vendedor`     VARCHAR(150)  NOT NULL,
+  `cliente_cpf`  VARCHAR(14)   DEFAULT NULL,
+  `produto_id`   INT           NOT NULL,
+  `quantidade`   INT           NOT NULL,
+  `total`        DECIMAL(10,2) NOT NULL,
+  `criado_em`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`produto_id`) REFERENCES `produtos`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
