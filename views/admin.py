@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import (
 from View.PY.FrmAdmin import Ui_FrmAdmin
 from database import Database, UsuarioAutenticado
 from utils.exportacao import exportar_excel, importar_csv, importar_excel
-from views.organizador import OrganizadorDialog
+from views.organizador import OrganizadorDialog, OrganizadorWidget
 from utils.relatorios import formatar_moeda, resumo_vendas
 from utils.validacao import (
     formatar_cpf,
@@ -68,7 +68,35 @@ class AdminWindow(QMainWindow):
         self._conectar_navegacao()
         self._conectar_acoes()
         self._adicionar_menu_dados()
+        self._adicionar_aba_organizador()
         self._atualizar_tudo()
+
+    def _adicionar_aba_organizador(self) -> None:
+        self._pg_organizador = QWidget()
+        pg_layout = QVBoxLayout(self._pg_organizador)
+        pg_layout.setContentsMargins(0, 0, 0, 0)
+        self._organizador_widget = OrganizadorWidget(db=self._db, parent=self._pg_organizador)
+        pg_layout.addWidget(self._organizador_widget)
+        self._ui.Telas_do_menu.addWidget(self._pg_organizador)
+
+        sidebar = self._ui.btn_home.parentWidget()
+        sidebar_layout = sidebar.layout()
+
+        btn = QPushButton("  Organizador")
+        btn.setObjectName("btn_organizador")
+        btn.setStyleSheet(self._ui.btn_home.styleSheet())
+        btn.setMinimumHeight(self._ui.btn_home.minimumHeight())
+        btn.setCursor(self._ui.btn_home.cursor())
+        btn.clicked.connect(
+            lambda: self._ui.Telas_do_menu.setCurrentWidget(self._pg_organizador)
+        )
+
+        if sidebar_layout is not None:
+            sidebar_layout.addWidget(btn)
+        else:
+            sidebar = self._ui.btn_home.parent()
+            btn.setParent(sidebar)
+            btn.show()
 
     def _injetar_tabela(self, pagina: QWidget, tabela: TabelaFiltrada) -> None:
         layout = pagina.layout()
@@ -350,10 +378,7 @@ class AdminWindow(QMainWindow):
             QMessageBox.critical(self, "Erro ao salvar", str(exc))
 
     def _abrir_organizador(self) -> None:
-        dialog = OrganizadorDialog(db=self._db, parent=self)
-        dialog.exec_()
-        self._carregar_produtos()
-        self._carregar_colaboradores()
+        self._ui.Telas_do_menu.setCurrentWidget(self._pg_organizador)
 
     def _exportar_produtos_excel(self) -> None:
         caminho, _ = QFileDialog.getSaveFileName(self, "Salvar como", "produtos.xlsx", "Excel (*.xlsx)")

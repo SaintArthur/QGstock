@@ -4,13 +4,14 @@ import os
 from pathlib import Path
 from typing import Any
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -20,8 +21,6 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
-    QSpacerItem,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -36,7 +35,6 @@ from utils.organizador import (
     Coluna,
     ResultadoOrganizacao,
     Template,
-    TRANSFORMACOES_DISPONIVEIS,
     TIPOS_CAMPO,
     detectar_mapeamento_automatico,
     listar_templates_salvos,
@@ -47,15 +45,15 @@ _PASTA_TEMPLATES = Path(__file__).parent.parent / "templates"
 
 _COR_ERRO = QColor(255, 180, 180)
 _COR_AVISO = QColor(255, 230, 150)
-_COR_DUP = QColor(200, 200, 200)
 _COR_OK = QColor(180, 240, 180)
 
-_ESTILO_BTN_PRIMARIO = (
-    "background:#9F3FFA; color:white; font-weight:bold; "
-    "padding:9px 20px; border-radius:7px; font-family:Montserrat; font-size:13px;"
+_BTN_PRIMARIO = (
+    "background:#9F3FFA;color:white;font-weight:bold;"
+    "padding:9px 20px;border-radius:7px;font-family:Montserrat;font-size:13px;"
 )
-_ESTILO_BTN_SECUNDARIO = (
-    "padding:8px 16px; border-radius:7px; border:1px solid #555; font-family:Montserrat;"
+_BTN_SECUNDARIO = (
+    "padding:8px 16px;border-radius:7px;border:1px solid #444;"
+    "font-family:Montserrat;color:white;background:transparent;"
 )
 
 
@@ -67,14 +65,13 @@ def _item_ro(valor: Any, cor: QColor | None = None) -> QTableWidgetItem:
     return item
 
 
-def _preencher_tabela_preview(
+def _preencher_preview(
     tabela: QTableWidget,
     cabecalhos: list[str],
     linhas: list[list[Any]],
     max_linhas: int = 500,
     linhas_erro: set[int] | None = None,
     linhas_aviso: set[int] | None = None,
-    linhas_dup: set[int] | None = None,
 ) -> None:
     exibir = linhas[:max_linhas]
     tabela.setColumnCount(len(cabecalhos))
@@ -83,162 +80,157 @@ def _preencher_tabela_preview(
     tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
     tabela.horizontalHeader().setStretchLastSection(True)
     tabela.verticalHeader().setVisible(True)
-    tabela.setAlternatingRowColors(False)
 
     erros = linhas_erro or set()
     avisos = linhas_aviso or set()
-    dups = linhas_dup or set()
 
     for row_idx, linha in enumerate(exibir):
         linha_real = row_idx + 2
-        if linha_real in dups:
-            cor = _COR_DUP
-        elif linha_real in erros:
+        if linha_real in erros:
             cor = _COR_ERRO
         elif linha_real in avisos:
             cor = _COR_AVISO
         else:
-            cor = None
+            cor = _COR_OK if linhas_erro is not None else None
 
         for col_idx, valor in enumerate(linha):
             tabela.setItem(row_idx, col_idx, _item_ro(valor, cor))
 
 
-class OrganizadorDialog(QDialog):
+class OrganizadorWidget(QWidget):
     def __init__(self, db: Any = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._db = db
-        self.setWindowTitle("Organizador de Planilhas")
-        self.resize(1100, 700)
-        self.setMinimumSize(900, 600)
-
         self._cabecalhos_fonte: list[str] = []
         self._dados_fonte: list[list[Any]] = []
         self._arquivo_atual: str = ""
         self._template_atual: Template | None = None
         self._resultado: ResultadoOrganizacao | None = None
+        self._combos_mapeamento: list[QComboBox] = []
+        self._todos_templates: list[Template] = []
 
         self._construir_ui()
         self._ir_para(0)
 
     def _construir_ui(self) -> None:
-        layout_raiz = QVBoxLayout(self)
-        layout_raiz.setSpacing(0)
-        layout_raiz.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        layout_raiz.addWidget(self._construir_cabecalho())
+        layout.addWidget(self._construir_cabecalho())
 
         self._stack = QStackedWidget()
         self._stack.addWidget(self._pagina_arquivo())
         self._stack.addWidget(self._pagina_template())
         self._stack.addWidget(self._pagina_resultado())
-        layout_raiz.addWidget(self._stack)
+        layout.addWidget(self._stack)
 
-        layout_raiz.addWidget(self._construir_rodape())
+        layout.addWidget(self._construir_rodape())
 
     def _construir_cabecalho(self) -> QWidget:
-        widget = QWidget()
-        widget.setStyleSheet("background:#1a1a2e; border-bottom: 2px solid #9F3FFA;")
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(20, 14, 20, 14)
+        w = QWidget()
+        w.setStyleSheet("background:#0d0d1a;border-bottom:2px solid #9F3FFA;")
+        layout = QHBoxLayout(w)
+        layout.setContentsMargins(20, 12, 20, 12)
 
-        lbl_titulo = QLabel("Organizador de Planilhas")
-        lbl_titulo.setStyleSheet("color:white; font-size:17px; font-weight:bold; font-family:Montserrat;")
-        layout.addWidget(lbl_titulo)
+        lbl = QLabel("Organizador de Planilhas")
+        lbl.setStyleSheet("color:white;font-size:16px;font-weight:bold;font-family:Montserrat;")
+        layout.addWidget(lbl)
 
         layout.addStretch()
 
         self._passos: list[QLabel] = []
-        nomes = ["1. Arquivo", "2. Template", "3. Resultado"]
-        for i, nome in enumerate(nomes):
-            lbl = QLabel(nome)
-            lbl.setStyleSheet("color:#888; font-family:Montserrat; font-size:12px; padding:4px 12px;")
-            layout.addWidget(lbl)
-            self._passos.append(lbl)
+        for nome in ["1. Arquivo", "2. Template", "3. Resultado"]:
+            lbl_p = QLabel(nome)
+            lbl_p.setStyleSheet("color:#888;font-family:Montserrat;font-size:12px;padding:4px 14px;")
+            layout.addWidget(lbl_p)
+            self._passos.append(lbl_p)
 
-        return widget
+        return w
 
     def _construir_rodape(self) -> QWidget:
-        widget = QWidget()
-        widget.setStyleSheet("background:#111; border-top:1px solid #333;")
-        layout = QHBoxLayout(widget)
+        w = QWidget()
+        w.setStyleSheet("background:#0d0d1a;border-top:1px solid #1e1e3a;")
+        layout = QHBoxLayout(w)
         layout.setContentsMargins(20, 10, 20, 10)
 
         self._btn_voltar = QPushButton("← Voltar")
-        self._btn_voltar.setStyleSheet(_ESTILO_BTN_SECUNDARIO)
+        self._btn_voltar.setStyleSheet(_BTN_SECUNDARIO)
         self._btn_voltar.clicked.connect(self._passo_anterior)
         layout.addWidget(self._btn_voltar)
 
         layout.addStretch()
 
         self._lbl_status = QLabel("")
-        self._lbl_status.setStyleSheet("color:#aaa; font-family:Montserrat; font-size:12px;")
+        self._lbl_status.setStyleSheet("color:#888;font-family:Montserrat;font-size:12px;")
         layout.addWidget(self._lbl_status)
 
         layout.addStretch()
 
         self._btn_proximo = QPushButton("Próximo →")
-        self._btn_proximo.setStyleSheet(_ESTILO_BTN_PRIMARIO)
+        self._btn_proximo.setStyleSheet(_BTN_PRIMARIO)
         self._btn_proximo.clicked.connect(self._passo_proximo)
         layout.addWidget(self._btn_proximo)
 
-        return widget
+        return w
 
     def _pagina_arquivo(self) -> QWidget:
         pg = QWidget()
         pg.setStyleSheet("background:#12121f;")
         layout = QVBoxLayout(pg)
-        layout.setContentsMargins(30, 30, 30, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(30, 24, 30, 16)
+        layout.setSpacing(14)
 
         lbl = QLabel("Selecione o arquivo para organizar")
-        lbl.setStyleSheet("color:white; font-size:15px; font-weight:bold; font-family:Montserrat;")
+        lbl.setStyleSheet("color:white;font-size:14px;font-weight:bold;font-family:Montserrat;")
         layout.addWidget(lbl)
 
-        zona_upload = QWidget()
-        zona_upload.setStyleSheet(
-            "border: 2px dashed #9F3FFA; border-radius: 12px; "
-            "background:#1a1a2e; padding: 20px;"
+        zona = QWidget()
+        zona.setStyleSheet(
+            "border:2px dashed #9F3FFA;border-radius:12px;background:#1a1a2e;padding:20px;"
         )
-        zona_layout = QVBoxLayout(zona_upload)
+        zona_layout = QVBoxLayout(zona)
         zona_layout.setAlignment(Qt.AlignCenter)
 
         self._lbl_arquivo = QLabel("Nenhum arquivo selecionado")
-        self._lbl_arquivo.setStyleSheet("color:#aaa; font-family:Montserrat; font-size:13px;")
+        self._lbl_arquivo.setStyleSheet("color:#888;font-family:Montserrat;font-size:12px;")
         self._lbl_arquivo.setAlignment(Qt.AlignCenter)
         zona_layout.addWidget(self._lbl_arquivo)
 
-        btn_selecionar = QPushButton("Escolher arquivo (Excel ou CSV)")
-        btn_selecionar.setStyleSheet(_ESTILO_BTN_PRIMARIO)
-        btn_selecionar.setFixedWidth(280)
-        btn_selecionar.clicked.connect(self._selecionar_arquivo)
-        zona_layout.addWidget(btn_selecionar, alignment=Qt.AlignCenter)
+        btn = QPushButton("Escolher arquivo (Excel ou CSV)")
+        btn.setStyleSheet(_BTN_PRIMARIO)
+        btn.setFixedWidth(280)
+        btn.clicked.connect(self._selecionar_arquivo)
+        zona_layout.addWidget(btn, alignment=Qt.AlignCenter)
 
-        lbl_formatos = QLabel("Formatos aceitos: .xlsx, .xls, .csv")
-        lbl_formatos.setStyleSheet("color:#666; font-size:11px; font-family:Montserrat;")
-        lbl_formatos.setAlignment(Qt.AlignCenter)
-        zona_layout.addWidget(lbl_formatos)
+        lbl_fmt = QLabel("Formatos aceitos: .xlsx  .xls  .csv")
+        lbl_fmt.setStyleSheet("color:#555;font-size:11px;font-family:Montserrat;")
+        lbl_fmt.setAlignment(Qt.AlignCenter)
+        zona_layout.addWidget(lbl_fmt)
 
-        layout.addWidget(zona_upload)
+        layout.addWidget(zona)
 
-        self._lbl_info_arquivo = QLabel("")
-        self._lbl_info_arquivo.setStyleSheet("color:#9F3FFA; font-family:Montserrat; font-size:12px;")
-        layout.addWidget(self._lbl_info_arquivo)
+        self._lbl_info = QLabel("")
+        self._lbl_info.setStyleSheet("color:#9F3FFA;font-family:Montserrat;font-size:11px;")
+        layout.addWidget(self._lbl_info)
 
-        grp_preview = QGroupBox("Prévia dos dados (primeiras 20 linhas)")
-        grp_preview.setStyleSheet(
-            "QGroupBox { color:white; font-family:Montserrat; border:1px solid #333; "
-            "border-radius:8px; margin-top:8px; padding-top:10px; } "
-            "QGroupBox::title { subcontrol-origin:margin; padding:0 6px; }"
+        grp = QGroupBox("Prévia dos dados (primeiras 20 linhas)")
+        grp.setStyleSheet(
+            "QGroupBox{color:white;font-family:Montserrat;border:1px solid #2a2a3e;"
+            "border-radius:8px;margin-top:8px;padding-top:10px;}"
+            "QGroupBox::title{subcontrol-origin:margin;padding:0 6px;}"
         )
-        grp_layout = QVBoxLayout(grp_preview)
+        g_layout = QVBoxLayout(grp)
         self._tabela_preview = QTableWidget()
-        self._tabela_preview.setStyleSheet("background:#1a1a2e; color:white; gridline-color:#333;")
+        self._tabela_preview.setStyleSheet(
+            "QTableWidget{background:#1a1a2e;color:white;gridline-color:#2a2a3e;}"
+            "QHeaderView::section{background:#0d0d1a;color:#aaa;padding:5px;}"
+        )
         self._tabela_preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._tabela_preview.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._tabela_preview.verticalHeader().setDefaultSectionSize(22)
-        grp_layout.addWidget(self._tabela_preview)
-        layout.addWidget(grp_preview)
+        g_layout.addWidget(self._tabela_preview)
+        layout.addWidget(grp)
 
         return pg
 
@@ -249,72 +241,73 @@ class OrganizadorDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
-        # Painel esquerdo — seleção e edição de template
         painel_esq = QWidget()
-        painel_esq.setMaximumWidth(340)
-        esq_layout = QVBoxLayout(painel_esq)
-        esq_layout.setSpacing(10)
+        painel_esq.setMaximumWidth(280)
+        esq = QVBoxLayout(painel_esq)
+        esq.setSpacing(10)
 
         lbl_t = QLabel("Template")
-        lbl_t.setStyleSheet("color:white; font-size:14px; font-weight:bold; font-family:Montserrat;")
-        esq_layout.addWidget(lbl_t)
+        lbl_t.setStyleSheet("color:white;font-size:13px;font-weight:bold;font-family:Montserrat;")
+        esq.addWidget(lbl_t)
 
         self._combo_template = QComboBox()
-        self._combo_template.setStyleSheet("padding:6px; font-family:Montserrat; color:white; background:#1a1a2e;")
+        self._combo_template.setStyleSheet(
+            "QComboBox{background:#1a1a2e;color:white;padding:6px;border:1px solid #333;border-radius:6px;}"
+            "QComboBox QAbstractItemView{background:#1a1a2e;color:white;}"
+        )
         self._combo_template.currentIndexChanged.connect(self._ao_mudar_template)
-        esq_layout.addWidget(self._combo_template)
+        esq.addWidget(self._combo_template)
         self._recarregar_templates()
 
-        self._lbl_desc_template = QLabel("")
-        self._lbl_desc_template.setStyleSheet("color:#aaa; font-size:11px; font-family:Montserrat;")
-        self._lbl_desc_template.setWordWrap(True)
-        esq_layout.addWidget(self._lbl_desc_template)
+        self._lbl_desc = QLabel("")
+        self._lbl_desc.setStyleSheet("color:#888;font-size:11px;font-family:Montserrat;")
+        self._lbl_desc.setWordWrap(True)
+        esq.addWidget(self._lbl_desc)
 
         btn_novo = QPushButton("+ Criar template do zero")
-        btn_novo.setStyleSheet(_ESTILO_BTN_SECUNDARIO + "color:white;")
+        btn_novo.setStyleSheet(_BTN_SECUNDARIO)
         btn_novo.clicked.connect(self._criar_template)
-        esq_layout.addWidget(btn_novo)
+        esq.addWidget(btn_novo)
 
         btn_salvar = QPushButton("Salvar template atual")
-        btn_salvar.setStyleSheet(_ESTILO_BTN_SECUNDARIO + "color:white;")
+        btn_salvar.setStyleSheet(_BTN_SECUNDARIO)
         btn_salvar.clicked.connect(self._salvar_template)
-        esq_layout.addWidget(btn_salvar)
+        esq.addWidget(btn_salvar)
 
-        self._chk_remover_dup = QCheckBox("Remover linhas duplicadas")
-        self._chk_remover_dup.setChecked(True)
-        self._chk_remover_dup.setStyleSheet("color:white; font-family:Montserrat;")
-        esq_layout.addWidget(self._chk_remover_dup)
+        self._chk_dup = QCheckBox("Remover linhas duplicadas")
+        self._chk_dup.setChecked(True)
+        self._chk_dup.setStyleSheet("color:white;font-family:Montserrat;font-size:12px;")
+        esq.addWidget(self._chk_dup)
 
-        esq_layout.addStretch()
+        esq.addStretch()
 
-        btn_organizar = QPushButton("Organizar planilha →")
-        btn_organizar.setStyleSheet(_ESTILO_BTN_PRIMARIO)
-        btn_organizar.clicked.connect(self._executar_organizacao)
-        esq_layout.addWidget(btn_organizar)
+        btn_org = QPushButton("Organizar planilha →")
+        btn_org.setStyleSheet(_BTN_PRIMARIO)
+        btn_org.clicked.connect(self._executar)
+        esq.addWidget(btn_org)
 
         layout.addWidget(painel_esq)
 
-        # Painel direito — mapeamento de colunas
         painel_dir = QWidget()
         dir_layout = QVBoxLayout(painel_dir)
         dir_layout.setSpacing(8)
 
         lbl_m = QLabel("Mapeamento de Colunas")
-        lbl_m.setStyleSheet("color:white; font-size:14px; font-weight:bold; font-family:Montserrat;")
+        lbl_m.setStyleSheet("color:white;font-size:13px;font-weight:bold;font-family:Montserrat;")
         dir_layout.addWidget(lbl_m)
 
-        lbl_hint = QLabel(
-            "Para cada coluna do template, selecione qual coluna do seu arquivo corresponde. "
-            "O sistema tenta detectar automaticamente."
+        lbl_h = QLabel(
+            "Para cada coluna do template selecione a coluna correspondente do seu arquivo. "
+            "O sistema detecta automaticamente quando os nomes são parecidos."
         )
-        lbl_hint.setStyleSheet("color:#888; font-size:11px; font-family:Montserrat;")
-        lbl_hint.setWordWrap(True)
-        dir_layout.addWidget(lbl_hint)
+        lbl_h.setStyleSheet("color:#666;font-size:11px;font-family:Montserrat;")
+        lbl_h.setWordWrap(True)
+        dir_layout.addWidget(lbl_h)
 
         self._tabela_mapeamento = QTableWidget()
         self._tabela_mapeamento.setStyleSheet(
-            "QTableWidget { background:#1a1a2e; color:white; gridline-color:#333; } "
-            "QHeaderView::section { background:#2a1a4e; color:white; padding:6px; }"
+            "QTableWidget{background:#1a1a2e;color:white;gridline-color:#2a2a3e;}"
+            "QHeaderView::section{background:#0d0d1a;color:#aaa;padding:6px;}"
         )
         self._tabela_mapeamento.setColumnCount(4)
         self._tabela_mapeamento.setHorizontalHeaderLabels(
@@ -326,106 +319,105 @@ class OrganizadorDialog(QDialog):
         dir_layout.addWidget(self._tabela_mapeamento)
 
         layout.addWidget(painel_dir)
-
         return pg
 
     def _pagina_resultado(self) -> QWidget:
         pg = QWidget()
         pg.setStyleSheet("background:#12121f;")
         layout = QVBoxLayout(pg)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
 
-        # Cards de stats
         self._cards_layout = QHBoxLayout()
         layout.addLayout(self._cards_layout)
 
-        # Tabela resultado
         grp = QGroupBox("Dados Organizados")
         grp.setStyleSheet(
-            "QGroupBox { color:white; font-family:Montserrat; border:1px solid #333; "
-            "border-radius:8px; margin-top:8px; padding-top:10px; } "
-            "QGroupBox::title { subcontrol-origin:margin; padding:0 6px; }"
+            "QGroupBox{color:white;font-family:Montserrat;border:1px solid #2a2a3e;"
+            "border-radius:8px;margin-top:6px;padding-top:10px;}"
+            "QGroupBox::title{subcontrol-origin:margin;padding:0 6px;}"
         )
-        grp_layout = QVBoxLayout(grp)
+        g = QVBoxLayout(grp)
 
-        lbl_legenda = QLabel(
-            "  ■ Verde = OK    ■ Amarelo = aviso (valor suspeito)    "
-            "■ Vermelho = erro (campo inválido)    ■ Cinza = duplicata removida"
+        lbl_leg = QLabel(
+            "  ■ Verde = OK     ■ Amarelo = aviso     ■ Vermelho = erro (campo inválido)"
         )
-        lbl_legenda.setStyleSheet("color:#aaa; font-size:10px; font-family:Montserrat;")
-        grp_layout.addWidget(lbl_legenda)
+        lbl_leg.setStyleSheet("color:#888;font-size:10px;font-family:Montserrat;")
+        g.addWidget(lbl_leg)
 
         self._tabela_resultado = QTableWidget()
         self._tabela_resultado.setStyleSheet(
-            "QTableWidget { background:#1a1a2e; color:white; gridline-color:#333; } "
-            "QHeaderView::section { background:#2a1a4e; color:white; padding:6px; }"
+            "QTableWidget{background:#1a1a2e;color:white;gridline-color:#2a2a3e;}"
+            "QHeaderView::section{background:#0d0d1a;color:#aaa;padding:6px;}"
         )
         self._tabela_resultado.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._tabela_resultado.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._tabela_resultado.verticalHeader().setDefaultSectionSize(22)
-        grp_layout.addWidget(self._tabela_resultado)
-
+        g.addWidget(self._tabela_resultado)
         layout.addWidget(grp)
 
-        # Painel de problemas
         grp_prob = QGroupBox("Problemas Encontrados")
         grp_prob.setStyleSheet(
-            "QGroupBox { color:white; font-family:Montserrat; border:1px solid #333; "
-            "border-radius:8px; margin-top:4px; padding-top:10px; } "
-            "QGroupBox::title { subcontrol-origin:margin; padding:0 6px; }"
+            "QGroupBox{color:white;font-family:Montserrat;border:1px solid #2a2a3e;"
+            "border-radius:8px;margin-top:4px;padding-top:10px;}"
+            "QGroupBox::title{subcontrol-origin:margin;padding:0 6px;}"
         )
-        grp_prob.setMaximumHeight(160)
-        prob_layout = QVBoxLayout(grp_prob)
-        self._txt_problemas = QTextEdit()
-        self._txt_problemas.setReadOnly(True)
-        self._txt_problemas.setStyleSheet(
-            "background:#1a1a2e; color:#ddd; font-family:Consolas,monospace; font-size:11px;"
+        grp_prob.setMaximumHeight(130)
+        gp = QVBoxLayout(grp_prob)
+        self._txt_prob = QTextEdit()
+        self._txt_prob.setReadOnly(True)
+        self._txt_prob.setStyleSheet(
+            "background:#0d0d1a;color:#ddd;font-family:Consolas,monospace;font-size:11px;"
+            "border:none;"
         )
-        prob_layout.addWidget(self._txt_problemas)
+        gp.addWidget(self._txt_prob)
         layout.addWidget(grp_prob)
 
-        # Botões de ação
         acoes = QHBoxLayout()
-
         self._btn_importar_bd = QPushButton("Importar para Banco de Dados")
-        self._btn_importar_bd.setStyleSheet(_ESTILO_BTN_PRIMARIO)
+        self._btn_importar_bd.setStyleSheet(_BTN_PRIMARIO)
         self._btn_importar_bd.setVisible(False)
-        self._btn_importar_bd.clicked.connect(self._importar_para_bd)
+        self._btn_importar_bd.clicked.connect(self._importar_bd)
         acoes.addWidget(self._btn_importar_bd)
 
         acoes.addStretch()
 
-        btn_exp_excel = QPushButton("Exportar Excel")
-        btn_exp_excel.setStyleSheet(_ESTILO_BTN_SECUNDARIO + "color:white;")
-        btn_exp_excel.clicked.connect(self._exportar_excel)
-        acoes.addWidget(btn_exp_excel)
+        btn_xlsx = QPushButton("Exportar Excel")
+        btn_xlsx.setStyleSheet(_BTN_SECUNDARIO)
+        btn_xlsx.clicked.connect(self._exportar_excel)
+        acoes.addWidget(btn_xlsx)
 
-        btn_exp_csv = QPushButton("Exportar CSV")
-        btn_exp_csv.setStyleSheet(_ESTILO_BTN_SECUNDARIO + "color:white;")
-        btn_exp_csv.clicked.connect(self._exportar_csv)
-        acoes.addWidget(btn_exp_csv)
+        btn_csv = QPushButton("Exportar CSV")
+        btn_csv.setStyleSheet(_BTN_SECUNDARIO)
+        btn_csv.clicked.connect(self._exportar_csv)
+        acoes.addWidget(btn_csv)
+
+        btn_novo = QPushButton("Nova planilha")
+        btn_novo.setStyleSheet(_BTN_SECUNDARIO)
+        btn_novo.clicked.connect(self._reiniciar)
+        acoes.addWidget(btn_novo)
 
         layout.addLayout(acoes)
-
         return pg
 
-    def _ir_para(self, indice: int) -> None:
-        self._stack.setCurrentIndex(indice)
+    def _ir_para(self, idx: int) -> None:
+        self._stack.setCurrentIndex(idx)
         for i, lbl in enumerate(self._passos):
-            if i == indice:
+            if i == idx:
                 lbl.setStyleSheet(
-                    "color:#9F3FFA; font-family:Montserrat; font-size:12px; "
-                    "padding:4px 12px; font-weight:bold; "
-                    "border-bottom:2px solid #9F3FFA;"
+                    "color:#9F3FFA;font-family:Montserrat;font-size:12px;"
+                    "padding:4px 14px;font-weight:bold;border-bottom:2px solid #9F3FFA;"
                 )
-            elif i < indice:
-                lbl.setStyleSheet("color:#4CAF50; font-family:Montserrat; font-size:12px; padding:4px 12px;")
+            elif i < idx:
+                lbl.setStyleSheet(
+                    "color:#4CAF50;font-family:Montserrat;font-size:12px;padding:4px 14px;"
+                )
             else:
-                lbl.setStyleSheet("color:#888; font-family:Montserrat; font-size:12px; padding:4px 12px;")
-
-        self._btn_voltar.setVisible(indice > 0)
-        self._btn_proximo.setVisible(indice < 2)
+                lbl.setStyleSheet(
+                    "color:#888;font-family:Montserrat;font-size:12px;padding:4px 14px;"
+                )
+        self._btn_voltar.setVisible(idx > 0)
+        self._btn_proximo.setVisible(idx < 2)
 
     def _passo_proximo(self) -> None:
         atual = self._stack.currentIndex()
@@ -437,20 +429,29 @@ class OrganizadorDialog(QDialog):
     def _passo_anterior(self) -> None:
         self._ir_para(self._stack.currentIndex() - 1)
 
+    def _reiniciar(self) -> None:
+        self._cabecalhos_fonte = []
+        self._dados_fonte = []
+        self._arquivo_atual = ""
+        self._resultado = None
+        self._lbl_arquivo.setText("Nenhum arquivo selecionado")
+        self._lbl_arquivo.setStyleSheet("color:#888;font-family:Montserrat;font-size:12px;")
+        self._lbl_info.setText("")
+        self._tabela_preview.setRowCount(0)
+        self._ir_para(0)
+
     def _selecionar_arquivo(self) -> None:
         caminho, _ = QFileDialog.getOpenFileName(
             self, "Selecionar planilha", "",
-            "Planilhas (*.xlsx *.xls *.csv);;Excel (*.xlsx *.xls);;CSV (*.csv)"
+            "Planilhas (*.xlsx *.xls *.csv);;Excel (*.xlsx *.xls);;CSV (*.csv)",
         )
         if not caminho:
             return
-
         try:
             ext = os.path.splitext(caminho)[1].lower()
-            if ext in (".xlsx", ".xls"):
-                cab, dados = importar_excel(caminho)
-            else:
-                cab, dados = importar_csv(caminho)
+            cab, dados = (
+                importar_excel(caminho) if ext in (".xlsx", ".xls") else importar_csv(caminho)
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Erro ao abrir arquivo", str(exc))
             return
@@ -465,106 +466,98 @@ class OrganizadorDialog(QDialog):
 
         nome = os.path.basename(caminho)
         self._lbl_arquivo.setText(f"✓  {nome}")
-        self._lbl_arquivo.setStyleSheet("color:#9F3FFA; font-family:Montserrat; font-size:13px; font-weight:bold;")
-        self._lbl_info_arquivo.setText(
-            f"{len(dados)} linhas  •  {len(cab)} colunas  •  {os.path.getsize(caminho) // 1024} KB"
+        self._lbl_arquivo.setStyleSheet(
+            "color:#9F3FFA;font-family:Montserrat;font-size:12px;font-weight:bold;"
+        )
+        tamanho = os.path.getsize(caminho)
+        self._lbl_info.setText(
+            f"{len(dados)} linhas  •  {len(cab)} colunas  •  {tamanho // 1024} KB"
         )
 
-        _preencher_tabela_preview(self._tabela_preview, cab, dados, max_linhas=20)
+        _preencher_preview(self._tabela_preview, cab, dados, max_linhas=20)
         self._atualizar_mapeamento()
 
     def _recarregar_templates(self) -> None:
         self._combo_template.blockSignals(True)
         self._combo_template.clear()
-
-        self._todos_templates: list[Template] = list(TEMPLATES_BUILTIN)
+        self._todos_templates = list(TEMPLATES_BUILTIN)
         self._todos_templates += listar_templates_salvos(_PASTA_TEMPLATES)
-
         for t in self._todos_templates:
             prefixo = "★ " if t.builtin else "◎ "
             self._combo_template.addItem(prefixo + t.nome)
-
         self._combo_template.blockSignals(False)
         self._combo_template.setCurrentIndex(0)
         self._ao_mudar_template(0)
 
     def _ao_mudar_template(self, idx: int) -> None:
-        if idx < 0 or idx >= len(self._todos_templates):
-            return
-        self._template_atual = self._todos_templates[idx]
-        self._lbl_desc_template.setText(self._template_atual.descricao)
-        self._atualizar_mapeamento()
+        if 0 <= idx < len(self._todos_templates):
+            self._template_atual = self._todos_templates[idx]
+            self._lbl_desc.setText(self._template_atual.descricao)
+            self._atualizar_mapeamento()
 
     def _atualizar_mapeamento(self) -> None:
         if not self._template_atual or not self._cabecalhos_fonte:
             return
 
-        template = self._template_atual
-        colunas = template.colunas
-
+        colunas = self._template_atual.colunas
         if not colunas:
             self._tabela_mapeamento.setRowCount(1)
             self._tabela_mapeamento.setItem(
-                0, 0, _item_ro("(Todas as colunas serão mantidas com limpeza básica)")
+                0, 0, _item_ro("Todas as colunas serão mantidas com limpeza básica")
             )
             for c in range(1, 4):
                 self._tabela_mapeamento.setItem(0, c, _item_ro(""))
+            self._combos_mapeamento = []
             return
 
         mapa_auto = detectar_mapeamento_automatico(self._cabecalhos_fonte, colunas)
         self._tabela_mapeamento.setRowCount(len(colunas))
-        self._combos_mapeamento: list[QComboBox] = []
-
+        self._combos_mapeamento = []
         opcoes = ["— não mapear —"] + self._cabecalhos_fonte
 
         for row, col in enumerate(colunas):
             self._tabela_mapeamento.setItem(row, 0, _item_ro(col.nome_exibido))
             self._tabela_mapeamento.setItem(row, 1, _item_ro(TIPOS_CAMPO.get(col.tipo, col.tipo)))
-            obrig = "✓" if col.obrigatorio else ""
-            item_obrig = _item_ro(obrig)
+            item_obrig = _item_ro("✓" if col.obrigatorio else "")
             if col.obrigatorio:
                 item_obrig.setForeground(QColor("#e55"))
             self._tabela_mapeamento.setItem(row, 2, item_obrig)
 
             combo = QComboBox()
-            combo.setStyleSheet("background:#2a1a4e; color:white; padding:3px;")
+            combo.setStyleSheet(
+                "QComboBox{background:#2a1a4e;color:white;padding:3px;border:none;}"
+                "QComboBox QAbstractItemView{background:#1a1a2e;color:white;}"
+            )
             combo.addItems(opcoes)
-
-            fonte_mapeada = mapa_auto.get(col.nome_alvo, "")
-            if fonte_mapeada and fonte_mapeada in self._cabecalhos_fonte:
-                combo.setCurrentText(fonte_mapeada)
-
+            mapeado = mapa_auto.get(col.nome_alvo, "")
+            if mapeado and mapeado in self._cabecalhos_fonte:
+                combo.setCurrentText(mapeado)
             self._tabela_mapeamento.setCellWidget(row, 3, combo)
             self._combos_mapeamento.append(combo)
 
-    def _obter_mapeamento_atual(self) -> dict[str, str]:
+    def _obter_mapeamento(self) -> dict[str, str]:
         if not self._template_atual or not self._template_atual.colunas:
             return {}
         mapa: dict[str, str] = {}
         for i, col in enumerate(self._template_atual.colunas):
-            if i >= len(self._combos_mapeamento):
-                break
-            selecionado = self._combos_mapeamento[i].currentText()
-            if selecionado != "— não mapear —":
-                mapa[col.nome_alvo] = selecionado
+            if i < len(self._combos_mapeamento):
+                sel = self._combos_mapeamento[i].currentText()
+                if sel != "— não mapear —":
+                    mapa[col.nome_alvo] = sel
         return mapa
 
-    def _executar_organizacao(self) -> None:
-        if not self._dados_fonte:
+    def _executar(self) -> None:
+        if not self._dados_fonte or not self._template_atual:
             QMessageBox.warning(self, "Sem dados", "Carregue um arquivo primeiro.")
             return
-        if not self._template_atual:
-            return
-
-        mapeamento = self._obter_mapeamento_atual()
 
         try:
             self._resultado = organizar(
                 self._cabecalhos_fonte,
                 self._dados_fonte,
                 self._template_atual,
-                mapeamento,
-                remover_duplicatas=self._chk_remover_dup.isChecked(),
+                self._obter_mapeamento(),
+                remover_duplicatas=self._chk_dup.isChecked(),
             )
         except Exception as exc:
             QMessageBox.critical(self, "Erro ao organizar", str(exc))
@@ -583,30 +576,29 @@ class OrganizadorDialog(QDialog):
             if item.widget():
                 item.widget().deleteLater()
 
-        cards = [
+        for titulo, valor, cor in [
             ("Total original", str(res.total_original), "#aaa"),
             ("Linhas limpas", str(len(res.dados)), "#4CAF50"),
             ("Erros", str(res.total_erros), "#e55" if res.total_erros else "#4CAF50"),
             ("Avisos", str(res.total_avisos), "#FFA726" if res.total_avisos else "#4CAF50"),
-            ("Duplicatas", str(len(res.indices_duplicatas)), "#888"),
-        ]
-        for titulo, valor, cor in cards:
+            ("Duplicatas removidas", str(len(res.indices_duplicatas)), "#888"),
+        ]:
             card = QWidget()
-            card.setStyleSheet("background:#1a1a2e; border-radius:8px; padding:10px; border:1px solid #333;")
+            card.setStyleSheet(
+                "background:#1a1a2e;border-radius:8px;padding:10px;border:1px solid #2a2a3e;"
+            )
             cl = QVBoxLayout(card)
             lt = QLabel(titulo)
-            lt.setStyleSheet("color:#aaa; font-size:10px; font-family:Montserrat;")
+            lt.setStyleSheet("color:#888;font-size:10px;font-family:Montserrat;")
             lv = QLabel(valor)
-            lv.setStyleSheet(f"color:{cor}; font-size:22px; font-weight:bold; font-family:Montserrat;")
+            lv.setStyleSheet(
+                f"color:{cor};font-size:20px;font-weight:bold;font-family:Montserrat;"
+            )
             cl.addWidget(lt)
             cl.addWidget(lv)
             self._cards_layout.addWidget(card)
 
-        dups_reais = set()
-        for idx in res.indices_duplicatas:
-            dups_reais.add(idx + 2)
-
-        _preencher_tabela_preview(
+        _preencher_preview(
             self._tabela_resultado,
             res.cabecalhos,
             res.dados,
@@ -616,13 +608,15 @@ class OrganizadorDialog(QDialog):
         )
 
         if res.problemas:
-            linhas_prob = []
-            for p in res.problemas[:200]:
-                icone = "❌" if p.nivel == "erro" else "⚠️"
-                linhas_prob.append(f"{icone}  Linha {p.linha}  |  {p.coluna}  →  {p.mensagem}")
-            self._txt_problemas.setPlainText("\n".join(linhas_prob))
+            linhas_txt = [
+                f"{'❌' if p.nivel == 'erro' else '⚠️'}  Linha {p.linha}  |  {p.coluna}  →  {p.mensagem}"
+                for p in res.problemas[:300]
+            ]
+            self._txt_prob.setPlainText("\n".join(linhas_txt))
         else:
-            self._txt_problemas.setPlainText("✓  Nenhum problema encontrado. Dados prontos para exportação.")
+            self._txt_prob.setPlainText(
+                "✓  Nenhum problema encontrado. Dados prontos para exportação."
+            )
 
         pode_importar = (
             self._db is not None
@@ -636,36 +630,33 @@ class OrganizadorDialog(QDialog):
                 f"Importar {len(res.dados)} registro(s) → {self._template_atual.nome}"
             )
 
-    def _importar_para_bd(self) -> None:
+    def _importar_bd(self) -> None:
         res = self._resultado
         if res is None or self._db is None or self._template_atual is None:
             return
 
-        nome_template = self._template_atual.nome
-        resposta = QMessageBox.question(
+        nome = self._template_atual.nome
+        resp = QMessageBox.question(
             self, "Confirmar importação",
-            f"Importar {len(res.dados)} linha(s) para a tabela de {nome_template.lower()}?",
+            f"Importar {len(res.dados)} linha(s) para {nome.lower()}?",
             QMessageBox.Yes | QMessageBox.No,
         )
-        if resposta != QMessageBox.Yes:
+        if resp != QMessageBox.Yes:
             return
 
         erros = 0
         for linha in res.dados:
             try:
-                if nome_template == "Produtos" and len(linha) >= 4:
+                if nome == "Produtos" and len(linha) >= 4:
                     self._db.cadastrar_produto(
-                        str(linha[0] or ""),
-                        str(linha[1] or ""),
-                        float(linha[2] or 0),
-                        int(linha[3] or 0),
+                        str(linha[0] or ""), str(linha[1] or ""),
+                        float(linha[2] or 0), int(linha[3] or 0),
                         int(linha[4]) if len(linha) > 4 and linha[4] else 5,
                         str(linha[5]) if len(linha) > 5 and linha[5] else "",
                     )
-                elif nome_template == "Clientes" and len(linha) >= 2:
+                elif nome == "Clientes" and len(linha) >= 2:
                     self._db.cadastrar_cliente(
-                        str(linha[0] or ""),
-                        str(linha[1] or ""),
+                        str(linha[0] or ""), str(linha[1] or ""),
                         str(linha[2]) if len(linha) > 2 and linha[2] else "",
                         str(linha[3]) if len(linha) > 3 and linha[3] else "",
                     )
@@ -673,34 +664,46 @@ class OrganizadorDialog(QDialog):
                 erros += 1
 
         ok = len(res.dados) - erros
-        msg = f"{ok} registro(s) importado(s) com sucesso."
+        msg = f"{ok} registro(s) importado(s)."
         if erros:
-            msg += f"\n{erros} linha(s) com erro foram ignoradas."
+            msg += f"\n{erros} linha(s) ignoradas."
         QMessageBox.information(self, "Importação concluída", msg)
 
     def _exportar_excel(self) -> None:
         if not self._resultado:
             return
-        caminho, _ = QFileDialog.getSaveFileName(self, "Salvar Excel", "planilha_organizada.xlsx", "Excel (*.xlsx)")
+        caminho, _ = QFileDialog.getSaveFileName(
+            self, "Salvar Excel", "planilha_organizada.xlsx", "Excel (*.xlsx)"
+        )
         if not caminho:
             return
         try:
-            exportar_excel(caminho, "Dados", self._resultado.cabecalhos, [tuple(r) for r in self._resultado.dados])
+            exportar_excel(
+                caminho, "Dados",
+                self._resultado.cabecalhos,
+                [tuple(r) for r in self._resultado.dados],
+            )
             QMessageBox.information(self, "Exportado", f"Salvo em:\n{caminho}")
         except Exception as exc:
-            QMessageBox.critical(self, "Erro ao exportar", str(exc))
+            QMessageBox.critical(self, "Erro", str(exc))
 
     def _exportar_csv(self) -> None:
         if not self._resultado:
             return
-        caminho, _ = QFileDialog.getSaveFileName(self, "Salvar CSV", "planilha_organizada.csv", "CSV (*.csv)")
+        caminho, _ = QFileDialog.getSaveFileName(
+            self, "Salvar CSV", "planilha_organizada.csv", "CSV (*.csv)"
+        )
         if not caminho:
             return
         try:
-            exportar_csv(caminho, self._resultado.cabecalhos, [tuple(r) for r in self._resultado.dados])
+            exportar_csv(
+                caminho,
+                self._resultado.cabecalhos,
+                [tuple(r) for r in self._resultado.dados],
+            )
             QMessageBox.information(self, "Exportado", f"Salvo em:\n{caminho}")
         except Exception as exc:
-            QMessageBox.critical(self, "Erro ao exportar", str(exc))
+            QMessageBox.critical(self, "Erro", str(exc))
 
     def _criar_template(self) -> None:
         dialog = _DialogCriarTemplate(self._cabecalhos_fonte, self)
@@ -717,8 +720,8 @@ class OrganizadorDialog(QDialog):
         if self._template_atual.builtin:
             QMessageBox.information(
                 self, "Template embutido",
-                "Templates embutidos não podem ser sobrescritos.\n"
-                "Use 'Criar template do zero' para fazer uma cópia personalizada."
+                "Templates embutidos não podem ser alterados.\n"
+                "Use 'Criar template do zero' para personalizar.",
             )
             return
         try:
@@ -728,123 +731,114 @@ class OrganizadorDialog(QDialog):
             QMessageBox.critical(self, "Erro ao salvar", str(exc))
 
 
+class OrganizadorDialog(QDialog):
+    def __init__(self, db: Any = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Organizador de Planilhas")
+        self.resize(1100, 700)
+        self.setMinimumSize(880, 580)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._widget = OrganizadorWidget(db=db, parent=self)
+        layout.addWidget(self._widget)
+
+
 class _DialogCriarTemplate(QDialog):
-    def __init__(self, colunas_sugeridas: list[str], parent: QWidget | None = None) -> None:
+    def __init__(
+        self, colunas_sugeridas: list[str], parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Criar Novo Template")
-        self.resize(680, 500)
-        self._colunas_sugeridas = colunas_sugeridas
+        self.resize(660, 480)
+        self._colunas = colunas_sugeridas
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
         form = QFormLayout()
         self._nome = QLineEdit()
-        self._nome.setPlaceholderText("Ex: Fornecedores Regional")
+        self._nome.setPlaceholderText("Ex: Fornecedores Regional Sul")
         self._descricao = QLineEdit()
-        self._descricao.setPlaceholderText("Descrição breve do uso deste template")
+        self._descricao.setPlaceholderText("Descrição breve")
         form.addRow("Nome:", self._nome)
         form.addRow("Descrição:", self._descricao)
         layout.addLayout(form)
 
-        lbl = QLabel("Colunas do template (uma por linha, formato: nome_interno | Nome Exibido | tipo | obrigatorio)")
-        lbl.setStyleSheet("color:#aaa; font-size:11px; font-family:Montserrat;")
-        lbl.setWordWrap(True)
+        lbl = QLabel(f"Tipos: {', '.join(TIPOS_CAMPO.keys())}")
+        lbl.setStyleSheet("color:#888;font-size:11px;")
         layout.addWidget(lbl)
 
-        lbl_tipos = QLabel(f"Tipos disponíveis: {', '.join(TIPOS_CAMPO.keys())}")
-        lbl_tipos.setStyleSheet("color:#777; font-size:10px; font-family:Montserrat;")
-        layout.addWidget(lbl_tipos)
-
-        self._tabela_colunas = QTableWidget()
-        self._tabela_colunas.setColumnCount(4)
-        self._tabela_colunas.setHorizontalHeaderLabels(
-            ["Nome interno", "Nome exibido", "Tipo", "Obrigatório"]
-        )
-        self._tabela_colunas.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self._tabela_colunas.setRowCount(len(colunas_sugeridas) or 1)
+        self._tbl = QTableWidget()
+        self._tbl.setColumnCount(4)
+        self._tbl.setHorizontalHeaderLabels(["Nome interno", "Nome exibido", "Tipo", "Obrigatório"])
+        self._tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._tbl.setRowCount(max(len(colunas_sugeridas), 1))
 
         for i, col in enumerate(colunas_sugeridas):
-            self._tabela_colunas.setItem(i, 0, QTableWidgetItem(col.lower().replace(" ", "_")))
-            self._tabela_colunas.setItem(i, 1, QTableWidgetItem(col))
+            self._tbl.setItem(i, 0, QTableWidgetItem(col.lower().replace(" ", "_")))
+            self._tbl.setItem(i, 1, QTableWidgetItem(col))
+            combo = QComboBox()
+            combo.addItems(list(TIPOS_CAMPO.keys()))
+            self._tbl.setCellWidget(i, 2, combo)
+            self._adicionar_checkbox(i, checked=True)
 
-            combo_tipo = QComboBox()
-            combo_tipo.addItems(list(TIPOS_CAMPO.keys()))
-            self._tabela_colunas.setCellWidget(i, 2, combo_tipo)
-
-            chk = QCheckBox()
-            chk.setChecked(True)
-            chk_widget = QWidget()
-            chk_layout = QHBoxLayout(chk_widget)
-            chk_layout.addWidget(chk)
-            chk_layout.setAlignment(Qt.AlignCenter)
-            chk_layout.setContentsMargins(0, 0, 0, 0)
-            self._tabela_colunas.setCellWidget(i, 3, chk_widget)
-
-        layout.addWidget(self._tabela_colunas)
+        layout.addWidget(self._tbl)
 
         btn_add = QPushButton("+ Adicionar coluna")
-        btn_add.clicked.connect(self._adicionar_linha)
+        btn_add.clicked.connect(self._add_linha)
         layout.addWidget(btn_add)
 
-        botoes = QHBoxLayout()
-        btn_ok = QPushButton("Criar Template")
-        btn_ok.setStyleSheet(_ESTILO_BTN_PRIMARIO)
-        btn_ok.clicked.connect(self._validar)
-        btn_cancel = QPushButton("Cancelar")
-        btn_cancel.clicked.connect(self.reject)
-        botoes.addStretch()
-        botoes.addWidget(btn_cancel)
-        botoes.addWidget(btn_ok)
-        layout.addLayout(botoes)
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.accepted.connect(self._validar)
+        botoes.rejected.connect(self.reject)
+        layout.addWidget(botoes)
 
-    def _adicionar_linha(self) -> None:
-        row = self._tabela_colunas.rowCount()
-        self._tabela_colunas.setRowCount(row + 1)
+    def _adicionar_checkbox(self, row: int, checked: bool = False) -> None:
+        chk = QCheckBox()
+        chk.setChecked(checked)
+        w = QWidget()
+        l = QHBoxLayout(w)
+        l.addWidget(chk)
+        l.setAlignment(Qt.AlignCenter)
+        l.setContentsMargins(0, 0, 0, 0)
+        self._tbl.setCellWidget(row, 3, w)
+
+    def _add_linha(self) -> None:
+        row = self._tbl.rowCount()
+        self._tbl.setRowCount(row + 1)
         combo = QComboBox()
         combo.addItems(list(TIPOS_CAMPO.keys()))
-        self._tabela_colunas.setCellWidget(row, 2, combo)
-        chk = QCheckBox()
-        chk.setChecked(False)
-        chk_w = QWidget()
-        chk_l = QHBoxLayout(chk_w)
-        chk_l.addWidget(chk)
-        chk_l.setAlignment(Qt.AlignCenter)
-        chk_l.setContentsMargins(0, 0, 0, 0)
-        self._tabela_colunas.setCellWidget(row, 3, chk_w)
+        self._tbl.setCellWidget(row, 2, combo)
+        self._adicionar_checkbox(row, checked=False)
 
     def _validar(self) -> None:
         if not self._nome.text().strip():
-            QMessageBox.warning(self, "Nome obrigatório", "Informe um nome para o template.")
+            QMessageBox.warning(self, "Campo obrigatório", "Informe o nome do template.")
             return
         self.accept()
 
     def template(self) -> Template:
         colunas: list[Coluna] = []
-        for row in range(self._tabela_colunas.rowCount()):
-            nome_int_item = self._tabela_colunas.item(row, 0)
-            nome_ext_item = self._tabela_colunas.item(row, 1)
-            combo_tipo = self._tabela_colunas.cellWidget(row, 2)
-            chk_w = self._tabela_colunas.cellWidget(row, 3)
-
-            if not nome_int_item or not nome_int_item.text().strip():
+        for row in range(self._tbl.rowCount()):
+            ni = self._tbl.item(row, 0)
+            ne = self._tbl.item(row, 1)
+            ct = self._tbl.cellWidget(row, 2)
+            cw = self._tbl.cellWidget(row, 3)
+            if not ni or not ni.text().strip():
                 continue
-
-            tipo: TipoCampo = combo_tipo.currentText() if combo_tipo else "texto"
             obrig = False
-            if chk_w:
-                chk = chk_w.findChild(QCheckBox)
+            if cw:
+                chk = cw.findChild(QCheckBox)
                 if chk:
                     obrig = chk.isChecked()
-
             colunas.append(Coluna(
-                nome_alvo=nome_int_item.text().strip(),
-                nome_exibido=(nome_ext_item.text().strip() if nome_ext_item else nome_int_item.text().strip()),
-                tipo=tipo,
+                nome_alvo=ni.text().strip(),
+                nome_exibido=(ne.text().strip() if ne else ni.text().strip()),
+                tipo=ct.currentText() if ct else "texto",
                 obrigatorio=obrig,
                 transformacoes=["trim"],
             ))
-
         return Template(
             nome=self._nome.text().strip(),
             descricao=self._descricao.text().strip(),
