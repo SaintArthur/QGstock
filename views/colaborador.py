@@ -23,6 +23,7 @@ from database import Database, UsuarioAutenticado
 from utils.exportacao import exportar_excel
 from utils.relatorios import formatar_moeda
 from utils.widgets import TabelaFiltrada
+from views.organizador import OrganizadorDialog
 
 
 class ColaboradorWindow(QMainWindow):
@@ -63,6 +64,11 @@ class ColaboradorWindow(QMainWindow):
         btn_exportar.setStyleSheet("padding:8px 16px; border-radius:6px;")
         btn_exportar.clicked.connect(self._exportar_vendas)
         cabecalho.addWidget(btn_exportar)
+
+        btn_org = QPushButton("Organizador de Planilhas")
+        btn_org.setStyleSheet("padding:8px 16px; border-radius:6px;")
+        btn_org.clicked.connect(lambda: OrganizadorDialog(parent=self).exec_())
+        cabecalho.addWidget(btn_org)
 
         layout.addLayout(cabecalho)
 

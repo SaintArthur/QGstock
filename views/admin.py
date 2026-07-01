@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
 from View.PY.FrmAdmin import Ui_FrmAdmin
 from database import Database, UsuarioAutenticado
 from utils.exportacao import exportar_excel, importar_csv, importar_excel
+from views.organizador import OrganizadorDialog
 from utils.relatorios import formatar_moeda, resumo_vendas
 from utils.validacao import (
     formatar_cpf,
@@ -98,6 +99,8 @@ class AdminWindow(QMainWindow):
         menu = self.menuBar().addMenu("Dados")
 
         acoes = [
+            ("🗂  Organizador de Planilhas", self._abrir_organizador),
+            None,
             ("Exportar Produtos (Excel)", self._exportar_produtos_excel),
             ("Exportar Vendas (Excel)", self._exportar_vendas_excel),
             ("Importar Produtos (Excel/CSV)", self._importar_produtos),
@@ -345,6 +348,12 @@ class AdminWindow(QMainWindow):
             self._carregar_produtos()
         except Exception as exc:
             QMessageBox.critical(self, "Erro ao salvar", str(exc))
+
+    def _abrir_organizador(self) -> None:
+        dialog = OrganizadorDialog(db=self._db, parent=self)
+        dialog.exec_()
+        self._carregar_produtos()
+        self._carregar_colaboradores()
 
     def _exportar_produtos_excel(self) -> None:
         caminho, _ = QFileDialog.getSaveFileName(self, "Salvar como", "produtos.xlsx", "Excel (*.xlsx)")
