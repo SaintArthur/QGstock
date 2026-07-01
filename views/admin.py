@@ -5,70 +5,39 @@ from datetime import date
 from typing import Any
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QAction,
+    QComboBox,
     QDateEdit,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QRadioButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from View.PY.FrmAdmin import Ui_FrmAdmin
 from database import Database, UsuarioAutenticado
-from utils.exportacao import exportar_csv, exportar_excel, importar_csv, importar_excel
-from utils.relatorios import formatar_moeda, resumo_estoque, resumo_vendas
-
-
-_COR_ALERTA = QColor(255, 200, 200)
-
-
-def _item_readonly(valor: Any) -> QTableWidgetItem:
-    item = QTableWidgetItem(str(valor) if valor is not None else "")
-    item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-    return item
-
-
-def _preencher_tabela(
-    tabela: QTableWidget,
-    cabecalhos: list[str],
-    linhas: list[tuple[Any, ...]],
-    colunas_alerta: tuple[int, int] | None = None,
-) -> None:
-    tabela.setColumnCount(len(cabecalhos))
-    tabela.setHorizontalHeaderLabels(cabecalhos)
-    tabela.setRowCount(len(linhas))
-    tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-    tabela.setAlternatingRowColors(True)
-
-    for row_idx, linha in enumerate(linhas):
-        for col_idx, valor in enumerate(linha):
-            tabela.setItem(row_idx, col_idx, _item_readonly(valor))
-
-        if colunas_alerta is not None:
-            col_qtde, col_minimo = colunas_alerta
-            try:
-                qtde = int(linha[col_qtde])
-                minimo = int(linha[col_minimo])
-                if qtde <= minimo:
-                    for c in range(len(linha)):
-                        item = tabela.item(row_idx, c)
-                        if item:
-                            item.setBackground(_COR_ALERTA)
-            except (TypeError, ValueError):
-                pass
+from utils.exportacao import exportar_excel, importar_csv, importar_excel
+from utils.relatorios import formatar_moeda, resumo_vendas
+from utils.validacao import (
+    formatar_cpf,
+    formatar_telefone,
+    validar_campos,
+    validar_cpf,
+    validar_email,
+    validar_senha,
+)
+from utils.widgets import TabelaFiltrada, item_readonly
 
 
 class AdminWindow(QMainWindow):
@@ -82,24 +51,42 @@ class AdminWindow(QMainWindow):
         self._ui.lbl_seja_bem_vindo.setText(f"Seja Bem-Vindo(a) — {usuario.nome}")
         self._ui.lbl_seja_bem_vindo.setFixedWidth(500)
 
+        self._tabela_colab = TabelaFiltrada(self._ui.pg_colaboradores)
+        self._tabela_fornec = TabelaFiltrada(self._ui.pg_fornecedores)
+        self._tabela_prod = TabelaFiltrada(self._ui.pg_produtos)
+
+        self._tabela_colab.linha_excluida.connect(self._excluir_colaborador)
+        self._tabela_fornec.linha_excluida.connect(self._excluir_fornecedor)
+        self._tabela_prod.linha_excluida.connect(self._excluir_produto)
+        self._tabela_prod.linha_editada.connect(self._editar_produto)
+
+        self._injetar_tabela(self._ui.pg_colaboradores, self._tabela_colab)
+        self._injetar_tabela(self._ui.pg_fornecedores, self._tabela_fornec)
+        self._injetar_tabela(self._ui.pg_produtos, self._tabela_prod)
+
         self._conectar_navegacao()
         self._conectar_acoes()
-        self._adicionar_menu_exportacao()
+        self._adicionar_menu_dados()
         self._atualizar_tudo()
+
+    def _injetar_tabela(self, pagina: QWidget, tabela: TabelaFiltrada) -> None:
+        layout = pagina.layout()
+        if layout is None:
+            layout = QVBoxLayout(pagina)
+            pagina.setLayout(layout)
+        layout.addWidget(tabela)
 
     def _conectar_navegacao(self) -> None:
         ui = self._ui
         nav = ui.Telas_do_menu
 
-        ui.btn_home.clicked.connect(lambda: nav.setCurrentWidget(ui.pg_home))
+        ui.btn_home.clicked.connect(lambda: [nav.setCurrentWidget(ui.pg_home), self._carregar_dashboard()])
         ui.btn_colaboradores.clicked.connect(lambda: [nav.setCurrentWidget(ui.pg_colaboradores), self._carregar_colaboradores()])
         ui.btn_cadastrar_colaboradores.clicked.connect(lambda: nav.setCurrentWidget(ui.pg_cadastro_colaboradores))
         ui.btn_alterar_colaboradores.clicked.connect(lambda: nav.setCurrentWidget(ui.alterar_colaboradores))
-
         ui.btn_fornecedores.clicked.connect(lambda: [nav.setCurrentWidget(ui.pg_fornecedores), self._carregar_fornecedores()])
         ui.btn_adicionar_forncedores.clicked.connect(lambda: nav.setCurrentWidget(ui.pg_cadastrar_fornecedores))
         ui.btn_editar_fornecedores.clicked.connect(lambda: nav.setCurrentWidget(ui.pg_alterar_fornecedores))
-
         ui.btn_produtos.clicked.connect(lambda: [nav.setCurrentWidget(ui.pg_produtos), self._carregar_produtos()])
         ui.btn_cadastrar_produto.clicked.connect(lambda: nav.setCurrentWidget(ui.pg_cadastar_produtos))
 
@@ -107,42 +94,29 @@ class AdminWindow(QMainWindow):
         self._ui.btn_cadastro.clicked.connect(self._cadastrar_colaborador)
         self._ui.btn_cadastrar_forncedores.clicked.connect(self._cadastrar_fornecedor)
 
-    def _adicionar_menu_exportacao(self) -> None:
-        menu_dados = self.menuBar().addMenu("Dados")
+    def _adicionar_menu_dados(self) -> None:
+        menu = self.menuBar().addMenu("Dados")
 
-        act_export_produtos = QAction("Exportar Produtos (Excel)", self)
-        act_export_produtos.triggered.connect(self._exportar_produtos_excel)
-        menu_dados.addAction(act_export_produtos)
+        acoes = [
+            ("Exportar Produtos (Excel)", self._exportar_produtos_excel),
+            ("Exportar Vendas (Excel)", self._exportar_vendas_excel),
+            ("Importar Produtos (Excel/CSV)", self._importar_produtos),
+            None,
+            ("Relatório de Vendas por Período", self._abrir_relatorio_periodo),
+            ("Produtos com Estoque Crítico", self._abrir_estoque_critico),
+            ("Ranking de Vendedores", self._abrir_ranking_vendedores),
+            ("Histórico de Movimentações", self._abrir_movimentacoes),
+            ("Ajuste Manual de Estoque", self._abrir_ajuste_estoque),
+        ]
 
-        act_export_vendas = QAction("Exportar Vendas (Excel)", self)
-        act_export_vendas.triggered.connect(self._exportar_vendas_excel)
-        menu_dados.addAction(act_export_vendas)
-
-        act_import_produtos = QAction("Importar Produtos (Excel/CSV)", self)
-        act_import_produtos.triggered.connect(self._importar_produtos)
-        menu_dados.addAction(act_import_produtos)
-
-        menu_dados.addSeparator()
-
-        act_relatorio = QAction("Relatório de Vendas por Período", self)
-        act_relatorio.triggered.connect(self._abrir_relatorio_periodo)
-        menu_dados.addAction(act_relatorio)
-
-        act_estoque_baixo = QAction("Produtos com Estoque Crítico", self)
-        act_estoque_baixo.triggered.connect(self._abrir_estoque_critico)
-        menu_dados.addAction(act_estoque_baixo)
-
-        act_ranking = QAction("Ranking de Vendedores", self)
-        act_ranking.triggered.connect(self._abrir_ranking_vendedores)
-        menu_dados.addAction(act_ranking)
-
-        act_movimentacoes = QAction("Histórico de Movimentações", self)
-        act_movimentacoes.triggered.connect(self._abrir_movimentacoes)
-        menu_dados.addAction(act_movimentacoes)
-
-        act_ajustar = QAction("Ajuste Manual de Estoque", self)
-        act_ajustar.triggered.connect(self._abrir_ajuste_estoque)
-        menu_dados.addAction(act_ajustar)
+        for item in acoes:
+            if item is None:
+                menu.addSeparator()
+            else:
+                titulo, slot = item
+                act = QAction(titulo, self)
+                act.triggered.connect(slot)
+                menu.addAction(act)
 
     def _atualizar_tudo(self) -> None:
         self._carregar_dashboard()
@@ -167,37 +141,36 @@ class AdminWindow(QMainWindow):
                 if child.widget():
                     child.widget().deleteLater()
 
-        kpi_items = [
-            ("Produtos Cadastrados", str(kpis["total_skus"])),
-            ("Valor em Estoque", formatar_moeda(kpis["valor_estoque"])),
-            ("Vendas Hoje", formatar_moeda(kpis["vendas_hoje"])),
-            ("Vendas no Mês", formatar_moeda(kpis["vendas_mes"])),
-            ("Clientes", str(kpis["total_clientes"])),
-            ("Alertas de Estoque", str(kpis["alertas_estoque"])),
-        ]
+        titulo = QLabel("Visão Geral do Estoque")
+        titulo.setStyleSheet("font-size: 18px; font-weight: bold; font-family: Montserrat; margin-bottom: 12px;")
+        layout.addWidget(titulo)
 
         grid = QHBoxLayout()
-        for titulo, valor in kpi_items:
-            card = self._criar_card_kpi(titulo, valor)
-            grid.addWidget(card)
+        cards = [
+            ("Produtos Cadastrados", str(kpis["total_skus"]), False),
+            ("Valor em Estoque", formatar_moeda(kpis["valor_estoque"]), False),
+            ("Vendas Hoje", formatar_moeda(kpis["vendas_hoje"]), False),
+            ("Vendas no Mês", formatar_moeda(kpis["vendas_mes"]), False),
+            ("Total de Clientes", str(kpis["total_clientes"]), False),
+            ("Alertas de Estoque", str(kpis["alertas_estoque"]), kpis["alertas_estoque"] > 0),
+        ]
+        for titulo_card, valor, alerta in cards:
+            grid.addWidget(self._criar_card(titulo_card, valor, alerta))
 
         layout.addLayout(grid)
         layout.addStretch()
 
-    def _criar_card_kpi(self, titulo: str, valor: str) -> QWidget:
+    def _criar_card(self, titulo: str, valor: str, alerta: bool = False) -> QWidget:
+        cor_valor = "#e55" if alerta else "#9F3FFA"
         card = QWidget()
-        card.setStyleSheet(
-            "background-color: #1e1e2e; border-radius: 10px; padding: 10px;"
-        )
+        card.setStyleSheet("background:#1e1e2e; border-radius:10px; padding:14px;")
         vl = QVBoxLayout(card)
-        lbl_titulo = QLabel(titulo)
-        lbl_titulo.setStyleSheet("color: #aaa; font-size: 11px; font-family: Montserrat;")
-        lbl_valor = QLabel(valor)
-        lbl_valor.setStyleSheet(
-            "color: #9F3FFA; font-size: 20px; font-weight: bold; font-family: Montserrat;"
-        )
-        vl.addWidget(lbl_titulo)
-        vl.addWidget(lbl_valor)
+        lbl_t = QLabel(titulo)
+        lbl_t.setStyleSheet("color:#aaa; font-size:11px; font-family:Montserrat;")
+        lbl_v = QLabel(valor)
+        lbl_v.setStyleSheet(f"color:{cor_valor}; font-size:22px; font-weight:bold; font-family:Montserrat;")
+        vl.addWidget(lbl_t)
+        vl.addWidget(lbl_v)
         return card
 
     def _carregar_colaboradores(self) -> None:
@@ -206,8 +179,7 @@ class AdminWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
             return
-        _preencher_tabela(
-            self._ui.tabela_colaboradores,
+        self._tabela_colab.preencher(
             ["Usuário", "Nível", "Nome", "CPF", "E-mail", "Telefone", "Cargo"],
             rows,
         )
@@ -218,11 +190,7 @@ class AdminWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
             return
-        _preencher_tabela(
-            self._ui.tabela_fornecedores,
-            ["ID", "Nome", "Endereço", "Contato"],
-            rows,
-        )
+        self._tabela_fornec.preencher(["ID", "Nome", "Endereço", "Contato"], rows)
 
     def _carregar_produtos(self) -> None:
         try:
@@ -230,8 +198,7 @@ class AdminWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
             return
-        _preencher_tabela(
-            self._ui.tabela_produto,
+        self._tabela_prod.preencher(
             ["ID", "Código", "Descrição", "Valor Unit.", "Estoque", "Mín.", "Fornecedor"],
             rows,
             colunas_alerta=(4, 5),
@@ -239,26 +206,38 @@ class AdminWindow(QMainWindow):
 
     def _cadastrar_colaborador(self) -> None:
         ui = self._ui
-        campos = {
-            "login": ui.line_login.text().strip(),
-            "senha": ui.line_senha.text(),
-            "nome": ui.line_nome.text().strip(),
-            "cpf": ui.line_cpf.text().strip(),
-            "email": ui.line_email.text().strip(),
-            "telefone": ui.line_telefone.text().strip(),
-            "cargo": ui.line_cargo.text().strip(),
-        }
+        login = ui.line_login.text().strip()
+        senha = ui.line_senha.text()
+        nome = ui.line_nome.text().strip()
+        cpf = ui.line_cpf.text().strip()
+        email = ui.line_email.text().strip()
+        telefone = ui.line_telefone.text().strip()
+        cargo = ui.line_cargo.text().strip()
         nivel = "colaborador" if ui.radio_colaborador.isChecked() else "admin"
 
-        if not campos["login"] or not campos["senha"] or not campos["nome"]:
-            QMessageBox.warning(self, "Atenção", "Login, senha e nome são obrigatórios.")
+        faltando = validar_campos({"Login": login, "Senha": senha, "Nome": nome})
+        if faltando:
+            QMessageBox.warning(self, "Campos obrigatórios", f"Preencha: {', '.join(faltando)}")
+            return
+
+        erro_senha = validar_senha(senha)
+        if erro_senha:
+            QMessageBox.warning(self, "Senha inválida", erro_senha)
+            return
+
+        if email and not validar_email(email):
+            QMessageBox.warning(self, "E-mail inválido", "Informe um e-mail válido.")
+            return
+
+        if cpf and not validar_cpf(cpf):
+            QMessageBox.warning(self, "CPF inválido", "O CPF informado não é válido.")
             return
 
         try:
             self._db.cadastrar_colaborador(
-                campos["login"], campos["senha"], nivel,
-                campos["nome"], campos["cpf"], campos["email"],
-                campos["telefone"], campos["cargo"],
+                login, senha, nivel, nome,
+                formatar_cpf(cpf) if cpf else "",
+                email, formatar_telefone(telefone) if telefone else "", cargo,
             )
         except Exception as exc:
             QMessageBox.critical(self, "Erro ao cadastrar", str(exc))
@@ -267,13 +246,35 @@ class AdminWindow(QMainWindow):
         QMessageBox.information(self, "Sucesso", "Colaborador cadastrado com sucesso.")
         self._carregar_colaboradores()
 
+    def _excluir_colaborador(self, row: int) -> None:
+        usuario = self._tabela_colab.dado_linha(row, 0)
+        nome = self._tabela_colab.dado_linha(row, 2)
+
+        if usuario == self._usuario.login:
+            QMessageBox.warning(self, "Ação negada", "Você não pode excluir sua própria conta.")
+            return
+
+        resposta = QMessageBox.question(
+            self, "Confirmar exclusão",
+            f"Excluir o colaborador '{nome}'?\n\nEssa ação não pode ser desfeita.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if resposta != QMessageBox.Yes:
+            return
+
+        try:
+            self._db.remover_colaborador(usuario)
+            self._carregar_colaboradores()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erro ao excluir", str(exc))
+
     def _cadastrar_fornecedor(self) -> None:
         nome = self._ui.line_cadastrar_nome_fornecedores.text().strip()
         endereco = self._ui.line_cadastrar_endereco_fornecedores.text().strip()
         contato = self._ui.line_cadastrar_contato_fornecedores.text().strip()
 
         if not nome:
-            QMessageBox.warning(self, "Atenção", "O nome do fornecedor é obrigatório.")
+            QMessageBox.warning(self, "Campo obrigatório", "O nome do fornecedor é obrigatório.")
             return
 
         try:
@@ -285,50 +286,101 @@ class AdminWindow(QMainWindow):
         QMessageBox.information(self, "Sucesso", "Fornecedor cadastrado com sucesso.")
         self._carregar_fornecedores()
 
-    def _exportar_produtos_excel(self) -> None:
-        caminho, _ = QFileDialog.getSaveFileName(
-            self, "Salvar como", "produtos.xlsx", "Excel (*.xlsx)"
+    def _excluir_fornecedor(self, row: int) -> None:
+        fornecedor_id = int(self._tabela_fornec.dado_linha(row, 0))
+        nome = self._tabela_fornec.dado_linha(row, 1)
+
+        resposta = QMessageBox.question(
+            self, "Confirmar exclusão",
+            f"Excluir o fornecedor '{nome}'?",
+            QMessageBox.Yes | QMessageBox.No,
         )
+        if resposta != QMessageBox.Yes:
+            return
+
+        try:
+            self._db.remover_fornecedor(fornecedor_id)
+            self._carregar_fornecedores()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erro ao excluir", str(exc))
+
+    def _excluir_produto(self, row: int) -> None:
+        produto_id = int(self._tabela_prod.dado_linha(row, 0))
+        descricao = self._tabela_prod.dado_linha(row, 2)
+
+        resposta = QMessageBox.question(
+            self, "Confirmar exclusão",
+            f"Excluir o produto '{descricao}'?\n\nIsso também apagará o histórico de movimentações.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if resposta != QMessageBox.Yes:
+            return
+
+        try:
+            self._db.remover_produto(produto_id)
+            self._carregar_produtos()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erro ao excluir", str(exc))
+
+    def _editar_produto(self, row: int) -> None:
+        produto_id = int(self._tabela_prod.dado_linha(row, 0))
+        try:
+            produtos = self._db.listar_produtos()
+            produto = next((p for p in produtos if p[0] == produto_id), None)
+            fornecedores = self._db.listar_fornecedores()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erro", str(exc))
+            return
+
+        if produto is None:
+            return
+
+        dialog = _DialogEditarProduto(produto, [f[1] for f in fornecedores], self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        cod, descricao, valor, qtde, minimo, fornecedor = dialog.dados()
+        try:
+            self._db.atualizar_produto(produto_id, cod, descricao, valor, qtde, minimo, fornecedor)
+            self._carregar_produtos()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erro ao salvar", str(exc))
+
+    def _exportar_produtos_excel(self) -> None:
+        caminho, _ = QFileDialog.getSaveFileName(self, "Salvar como", "produtos.xlsx", "Excel (*.xlsx)")
         if not caminho:
             return
         try:
             rows = self._db.listar_produtos()
             exportar_excel(
-                caminho,
-                "Produtos",
+                caminho, "Produtos",
                 ["ID", "Código", "Descrição", "Valor Unit.", "Estoque", "Mín.", "Fornecedor"],
                 rows,
                 colunas_alerta={4: (4, 5)},
             )
-            QMessageBox.information(self, "Exportado", f"Arquivo salvo em:\n{caminho}")
+            QMessageBox.information(self, "Exportado", f"Salvo em:\n{caminho}")
         except Exception as exc:
             QMessageBox.critical(self, "Erro ao exportar", str(exc))
 
     def _exportar_vendas_excel(self) -> None:
-        caminho, _ = QFileDialog.getSaveFileName(
-            self, "Salvar como", "vendas.xlsx", "Excel (*.xlsx)"
-        )
+        caminho, _ = QFileDialog.getSaveFileName(self, "Salvar como", "vendas.xlsx", "Excel (*.xlsx)")
         if not caminho:
             return
         try:
             rows = self._db.listar_vendas()
             exportar_excel(
-                caminho,
-                "Vendas",
+                caminho, "Vendas",
                 ["ID", "Vendedor", "Cliente CPF", "Produto", "Qtde", "Total", "Data"],
                 rows,
             )
-            QMessageBox.information(self, "Exportado", f"Arquivo salvo em:\n{caminho}")
+            QMessageBox.information(self, "Exportado", f"Salvo em:\n{caminho}")
         except Exception as exc:
             QMessageBox.critical(self, "Erro ao exportar", str(exc))
 
     def _importar_produtos(self) -> None:
-        caminho, _ = QFileDialog.getOpenFileName(
-            self, "Abrir arquivo", "", "Excel/CSV (*.xlsx *.csv)"
-        )
+        caminho, _ = QFileDialog.getOpenFileName(self, "Abrir arquivo", "", "Excel/CSV (*.xlsx *.csv)")
         if not caminho:
             return
-
         try:
             ext = os.path.splitext(caminho)[1].lower()
             cabecalhos, dados = (
@@ -352,15 +404,16 @@ class AdminWindow(QMainWindow):
                 self._db.cadastrar_produto(
                     str(linha[0]), str(linha[1]),
                     float(str(linha[2]).replace(",", ".")),
-                    int(linha[3]), int(linha[4] if len(linha) > 4 else 5),
-                    str(linha[5] if len(linha) > 5 else ""),
+                    int(linha[3]),
+                    int(linha[4]) if len(linha) > 4 else 5,
+                    str(linha[5]) if len(linha) > 5 else "",
                 )
             except Exception:
                 erros += 1
 
         msg = f"{len(dados) - erros} produto(s) importado(s)."
         if erros:
-            msg += f"\n{erros} linha(s) com erro foram ignoradas."
+            msg += f"\n{erros} linha(s) com erro ignoradas."
         QMessageBox.information(self, "Importação concluída", msg)
         self._carregar_produtos()
 
@@ -368,7 +421,6 @@ class AdminWindow(QMainWindow):
         dialog = _DialogPeriodo(self)
         if dialog.exec_() != QDialog.Accepted:
             return
-
         inicio, fim = dialog.periodo()
         try:
             rows = self._db.relatorio_vendas_periodo(inicio, fim)
@@ -378,12 +430,11 @@ class AdminWindow(QMainWindow):
 
         resumo = resumo_vendas(rows)
         _DialogTabela(
-            f"Vendas de {inicio} a {fim}  |  "
+            f"Vendas {inicio} a {fim}  |  "
             f"Receita: {formatar_moeda(resumo['receita_total'])}  |  "
             f"Itens: {resumo['itens_vendidos']}",
             ["ID", "Vendedor", "Cliente CPF", "Produto", "Qtde", "Total", "Data"],
-            rows,
-            self,
+            rows, self,
         ).exec_()
 
     def _abrir_estoque_critico(self) -> None:
@@ -392,12 +443,10 @@ class AdminWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
             return
-
         _DialogTabela(
-            f"Produtos com Estoque Crítico — {len(rows)} item(s)",
-            ["ID", "Código", "Descrição", "Estoque Atual", "Estoque Mín.", "Fornecedor"],
-            rows,
-            self,
+            f"Estoque Crítico — {len(rows)} produto(s)",
+            ["ID", "Código", "Descrição", "Estoque", "Mín.", "Fornecedor"],
+            rows, self,
         ).exec_()
 
     def _abrir_ranking_vendedores(self) -> None:
@@ -406,13 +455,11 @@ class AdminWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
             return
-
         formatado = [(r[0], r[1], formatar_moeda(float(r[2]))) for r in rows]
         _DialogTabela(
             "Ranking de Vendedores",
             ["Vendedor", "Nº Vendas", "Total Vendido"],
-            formatado,
-            self,
+            formatado, self,
         ).exec_()
 
     def _abrir_movimentacoes(self) -> None:
@@ -421,12 +468,10 @@ class AdminWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
             return
-
         _DialogTabela(
             f"Histórico de Movimentações — {len(rows)} registro(s)",
             ["ID", "Produto", "Tipo", "Quantidade", "Motivo", "Data/Hora"],
-            rows,
-            self,
+            rows, self,
         ).exec_()
 
     def _abrir_ajuste_estoque(self) -> None:
@@ -445,6 +490,7 @@ class AdminWindow(QMainWindow):
             self._db.ajustar_estoque(produto_id, quantidade, tipo, motivo)
             QMessageBox.information(self, "Sucesso", "Estoque ajustado com sucesso.")
             self._carregar_produtos()
+            self._carregar_dashboard()
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
 
@@ -459,22 +505,22 @@ class _DialogTabela(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(titulo)
-        self.resize(900, 500)
+        self.resize(960, 520)
 
         layout = QVBoxLayout(self)
         lbl = QLabel(titulo)
-        lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        lbl.setStyleSheet("font-weight: bold; font-size: 13px; font-family: Montserrat;")
         layout.addWidget(lbl)
 
-        tabela = QTableWidget()
-        _preencher_tabela(tabela, cabecalhos, linhas)
-        layout.addWidget(tabela)
+        self._tabela = TabelaFiltrada()
+        self._tabela.preencher(cabecalhos, linhas)
+        layout.addWidget(self._tabela)
 
         botoes = QHBoxLayout()
         btn_exportar = QPushButton("Exportar Excel")
+        btn_exportar.clicked.connect(lambda: self._exportar(cabecalhos, linhas))
         btn_fechar = QPushButton("Fechar")
         btn_fechar.clicked.connect(self.accept)
-        btn_exportar.clicked.connect(lambda: self._exportar(cabecalhos, linhas))
         botoes.addWidget(btn_exportar)
         botoes.addStretch()
         botoes.addWidget(btn_fechar)
@@ -513,7 +559,78 @@ class _DialogPeriodo(QDialog):
         layout.addRow(botoes)
 
     def periodo(self) -> tuple[str, str]:
-        return self._inicio.date().toString("yyyy-MM-dd"), self._fim.date().toString("yyyy-MM-dd")
+        return (
+            self._inicio.date().toString("yyyy-MM-dd"),
+            self._fim.date().toString("yyyy-MM-dd"),
+        )
+
+
+class _DialogEditarProduto(QDialog):
+    def __init__(
+        self,
+        produto: tuple[Any, ...],
+        fornecedores: list[str],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Editar Produto")
+        self.setFixedSize(440, 320)
+
+        layout = QFormLayout(self)
+
+        self._cod = QLineEdit(str(produto[1]))
+        self._descricao = QLineEdit(str(produto[2]))
+
+        self._valor = QLineEdit(str(produto[3]).replace(".", ","))
+        self._valor.setPlaceholderText("0,00")
+
+        self._qtde = QSpinBox()
+        self._qtde.setRange(0, 999999)
+        self._qtde.setValue(int(produto[4]))
+
+        self._minimo = QSpinBox()
+        self._minimo.setRange(0, 999999)
+        self._minimo.setValue(int(produto[5]))
+
+        self._fornecedor = QComboBox()
+        self._fornecedor.addItems(fornecedores)
+        atual = str(produto[6]) if produto[6] else ""
+        idx = self._fornecedor.findText(atual)
+        if idx >= 0:
+            self._fornecedor.setCurrentIndex(idx)
+
+        layout.addRow("Código:", self._cod)
+        layout.addRow("Descrição:", self._descricao)
+        layout.addRow("Valor unit. (R$):", self._valor)
+        layout.addRow("Estoque atual:", self._qtde)
+        layout.addRow("Estoque mínimo:", self._minimo)
+        layout.addRow("Fornecedor:", self._fornecedor)
+
+        botoes = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        botoes.accepted.connect(self._validar)
+        botoes.rejected.connect(self.reject)
+        layout.addRow(botoes)
+
+    def _validar(self) -> None:
+        if not self._cod.text().strip() or not self._descricao.text().strip():
+            QMessageBox.warning(self, "Campos obrigatórios", "Código e descrição são obrigatórios.")
+            return
+        try:
+            float(self._valor.text().replace(",", "."))
+        except ValueError:
+            QMessageBox.warning(self, "Valor inválido", "Informe um valor numérico válido.")
+            return
+        self.accept()
+
+    def dados(self) -> tuple[str, str, float, int, int, str]:
+        return (
+            self._cod.text().strip(),
+            self._descricao.text().strip(),
+            float(self._valor.text().replace(",", ".")),
+            self._qtde.value(),
+            self._minimo.value(),
+            self._fornecedor.currentText(),
+        )
 
 
 class _DialogPreviewImportacao(QDialog):
@@ -528,14 +645,17 @@ class _DialogPreviewImportacao(QDialog):
         self.resize(800, 400)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"{len(dados)} linha(s) encontradas. Confirmar importação?"))
+        layout.addWidget(QLabel(
+            f"<b>{len(dados)}</b> linha(s) encontradas. "
+            "Colunas esperadas: Código, Descrição, Valor, Estoque, Estoque Mín., Fornecedor"
+        ))
 
-        tabela = QTableWidget()
-        _preencher_tabela(tabela, cabecalhos, [tuple(r) for r in dados[:50]])
+        tabela = TabelaFiltrada()
+        tabela.preencher(cabecalhos, [tuple(r) for r in dados[:100]])
         layout.addWidget(tabela)
 
-        if len(dados) > 50:
-            layout.addWidget(QLabel(f"(mostrando primeiras 50 de {len(dados)} linhas)"))
+        if len(dados) > 100:
+            layout.addWidget(QLabel(f"(exibindo primeiras 100 de {len(dados)} linhas)"))
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         botoes.accepted.connect(self.accept)
@@ -549,34 +669,32 @@ class _DialogAjusteEstoque(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Ajuste Manual de Estoque")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(420, 300)
         self._produtos = produtos
-
-        from PyQt5.QtWidgets import QComboBox, QRadioButton, QSpinBox
 
         layout = QFormLayout(self)
 
         self._combo = QComboBox()
         for p in produtos:
-            self._combo.addItem(f"[{p[1]}] {p[2]}", userData=p[0])
+            self._combo.addItem(f"[{p[1]}] {p[2]}  (atual: {p[4]})", userData=p[0])
         layout.addRow("Produto:", self._combo)
 
-        self._spin_qtde = QSpinBox()
-        self._spin_qtde.setMinimum(1)
-        self._spin_qtde.setMaximum(99999)
-        layout.addRow("Quantidade:", self._spin_qtde)
+        self._spin = QSpinBox()
+        self._spin.setRange(1, 99999)
+        layout.addRow("Quantidade:", self._spin)
 
         tipo_widget = QWidget()
         tipo_layout = QHBoxLayout(tipo_widget)
-        self._radio_entrada = QRadioButton("Entrada")
-        self._radio_saida = QRadioButton("Saída")
+        tipo_layout.setContentsMargins(0, 0, 0, 0)
+        self._radio_entrada = QRadioButton("Entrada (adicionar)")
+        self._radio_saida = QRadioButton("Saída (remover)")
         self._radio_entrada.setChecked(True)
         tipo_layout.addWidget(self._radio_entrada)
         tipo_layout.addWidget(self._radio_saida)
         layout.addRow("Tipo:", tipo_widget)
 
         self._motivo = QLineEdit()
-        self._motivo.setPlaceholderText("Ex: Recebimento NF 1234")
+        self._motivo.setPlaceholderText("Ex: Recebimento NF 1234, Perda, Inventário...")
         layout.addRow("Motivo:", self._motivo)
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -586,7 +704,7 @@ class _DialogAjusteEstoque(QDialog):
 
     def _validar(self) -> None:
         if not self._motivo.text().strip():
-            QMessageBox.warning(self, "Atenção", "Informe o motivo do ajuste.")
+            QMessageBox.warning(self, "Campo obrigatório", "Informe o motivo do ajuste.")
             return
         self.accept()
 
@@ -594,7 +712,7 @@ class _DialogAjusteEstoque(QDialog):
         tipo = "entrada" if self._radio_entrada.isChecked() else "saida"
         return (
             self._combo.currentData(),
-            self._spin_qtde.value(),
+            self._spin.value(),
             tipo,
             self._motivo.text().strip(),
         )

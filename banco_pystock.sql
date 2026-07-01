@@ -18,9 +18,10 @@ CREATE TABLE IF NOT EXISTS `login` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- senha "admin123" → SHA-256
+-- senha padrao: "admin123"  |  hash = SHA-256("admin123")
+-- TROQUE a senha apos o primeiro login ou use setup_db.py para gerar o hash correto
 INSERT INTO `login` (`usuario`, `senha`, `nivel`, `nome`) VALUES
-('admin', 'fe8d31a78b5e7425e73e8a1f37e63d7de4e1d96c8c3f2b4c5c6d9e4f0a1b2c3', 'admin', 'Administrador');
+('admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'admin', 'Administrador');
 
 CREATE TABLE IF NOT EXISTS `clientes` (
   `id`         INT          NOT NULL AUTO_INCREMENT,

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -16,7 +14,6 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -25,7 +22,7 @@ from View.PY.FrmColaborador import Ui_FrmColaborador
 from database import Database, UsuarioAutenticado
 from utils.exportacao import exportar_excel
 from utils.relatorios import formatar_moeda
-from views.admin import _item_readonly, _preencher_tabela
+from utils.widgets import TabelaFiltrada
 
 
 class ColaboradorWindow(QMainWindow):
@@ -35,66 +32,68 @@ class ColaboradorWindow(QMainWindow):
         self._usuario = usuario
         self._ui = Ui_FrmColaborador()
         self._ui.setupUi(self)
+        self.setWindowTitle(f"QGstock — {usuario.nome}")
 
         self._construir_interface()
         self._carregar_dados()
 
     def _construir_interface(self) -> None:
-        central = self.centralWidget()
-        if central is None:
-            central = QWidget()
-            self.setCentralWidget(central)
+        central = QWidget()
+        self.setCentralWidget(central)
 
-        layout_principal = QVBoxLayout(central)
+        layout = QVBoxLayout(central)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
 
         cabecalho = QHBoxLayout()
-        lbl_bem_vindo = QLabel(f"Bem-vindo(a), {self._usuario.nome}")
-        lbl_bem_vindo.setStyleSheet("font-size: 16px; font-weight: bold; font-family: Montserrat;")
+        lbl_bem_vindo = QLabel(f"Bem-vindo(a), <b>{self._usuario.nome}</b>")
+        lbl_bem_vindo.setStyleSheet("font-size: 16px; font-family: Montserrat;")
         cabecalho.addWidget(lbl_bem_vindo)
         cabecalho.addStretch()
 
-        btn_nova_venda = QPushButton("Nova Venda")
-        btn_nova_venda.setStyleSheet(
-            "background-color: #9F3FFA; color: white; font-weight: bold; padding: 8px 16px;"
+        btn_venda = QPushButton("+ Nova Venda")
+        btn_venda.setStyleSheet(
+            "background:#9F3FFA; color:white; font-weight:bold; "
+            "padding:8px 16px; border-radius:6px; font-family:Montserrat;"
         )
-        btn_nova_venda.clicked.connect(self._registrar_venda)
-        cabecalho.addWidget(btn_nova_venda)
+        btn_venda.clicked.connect(self._registrar_venda)
+        cabecalho.addWidget(btn_venda)
 
         btn_exportar = QPushButton("Exportar Minhas Vendas")
-        btn_exportar.clicked.connect(self._exportar_minhas_vendas)
+        btn_exportar.setStyleSheet("padding:8px 16px; border-radius:6px;")
+        btn_exportar.clicked.connect(self._exportar_vendas)
         cabecalho.addWidget(btn_exportar)
 
-        layout_principal.addLayout(cabecalho)
+        layout.addLayout(cabecalho)
 
-        self._kpi_widget = QWidget()
-        kpi_layout = QHBoxLayout(self._kpi_widget)
-        self._lbl_vendas_hoje = QLabel("—")
-        self._lbl_vendas_mes = QLabel("—")
-        self._lbl_num_vendas = QLabel("—")
+        kpi_layout = QHBoxLayout()
+        self._lbl_hoje = QLabel("—")
+        self._lbl_mes = QLabel("—")
+        self._lbl_num = QLabel("—")
 
-        for titulo, lbl in [
-            ("Vendas Hoje", self._lbl_vendas_hoje),
-            ("Vendas no Mês", self._lbl_vendas_mes),
-            ("Nº de Vendas", self._lbl_num_vendas),
+        for rotulo, lbl in [
+            ("Vendas Hoje", self._lbl_hoje),
+            ("Vendas no Mês", self._lbl_mes),
+            ("Total de Vendas", self._lbl_num),
         ]:
             card = QWidget()
-            card.setStyleSheet("background: #1e1e2e; border-radius: 8px; padding: 8px;")
+            card.setStyleSheet("background:#1e1e2e; border-radius:10px; padding:14px;")
             cl = QVBoxLayout(card)
-            lt = QLabel(titulo)
-            lt.setStyleSheet("color: #aaa; font-size: 11px;")
-            lbl.setStyleSheet("color: #9F3FFA; font-size: 18px; font-weight: bold;")
+            lt = QLabel(rotulo)
+            lt.setStyleSheet("color:#aaa; font-size:11px; font-family:Montserrat;")
+            lbl.setStyleSheet("color:#9F3FFA; font-size:20px; font-weight:bold; font-family:Montserrat;")
             cl.addWidget(lt)
             cl.addWidget(lbl)
             kpi_layout.addWidget(card)
 
-        layout_principal.addWidget(self._kpi_widget)
+        layout.addLayout(kpi_layout)
 
         lbl_tabela = QLabel("Minhas Vendas")
-        lbl_tabela.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 10px;")
-        layout_principal.addWidget(lbl_tabela)
+        lbl_tabela.setStyleSheet("font-size:14px; font-weight:bold; font-family:Montserrat;")
+        layout.addWidget(lbl_tabela)
 
-        self._tabela_vendas = QTableWidget()
-        layout_principal.addWidget(self._tabela_vendas)
+        self._tabela = TabelaFiltrada()
+        layout.addWidget(self._tabela)
 
     def _carregar_dados(self) -> None:
         self._carregar_kpis()
@@ -105,8 +104,8 @@ class ColaboradorWindow(QMainWindow):
             kpis = self._db.kpis_dashboard()
         except Exception:
             return
-        self._lbl_vendas_hoje.setText(formatar_moeda(kpis["vendas_hoje"]))
-        self._lbl_vendas_mes.setText(formatar_moeda(kpis["vendas_mes"]))
+        self._lbl_hoje.setText(formatar_moeda(kpis["vendas_hoje"]))
+        self._lbl_mes.setText(formatar_moeda(kpis["vendas_mes"]))
 
     def _carregar_vendas(self) -> None:
         try:
@@ -114,11 +113,9 @@ class ColaboradorWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Erro", str(exc))
             return
-
         minhas = [v for v in todas if v[1] == self._usuario.nome]
-        self._lbl_num_vendas.setText(str(len(minhas)))
-        _preencher_tabela(
-            self._tabela_vendas,
+        self._lbl_num.setText(str(len(minhas)))
+        self._tabela.preencher(
             ["ID", "Vendedor", "Cliente CPF", "Produto", "Qtde", "Total", "Data"],
             minhas,
         )
@@ -131,25 +128,24 @@ class ColaboradorWindow(QMainWindow):
             QMessageBox.critical(self, "Erro", str(exc))
             return
 
-        if not produtos:
-            QMessageBox.warning(self, "Atenção", "Nenhum produto cadastrado.")
+        disponiveis = [p for p in produtos if int(p[4]) > 0]
+        if not disponiveis:
+            QMessageBox.warning(self, "Sem estoque", "Nenhum produto disponível em estoque.")
             return
 
-        dialog = _DialogNovaVenda(produtos, clientes, self)
+        dialog = _DialogNovaVenda(disponiveis, clientes, self)
         if dialog.exec_() != QDialog.Accepted:
             return
 
         produto_id, cliente_cpf, quantidade, total = dialog.dados()
         try:
-            self._db.registrar_venda(
-                self._usuario.nome, cliente_cpf, produto_id, quantidade, total
-            )
-            QMessageBox.information(self, "Sucesso", f"Venda registrada. Total: {formatar_moeda(total)}")
+            self._db.registrar_venda(self._usuario.nome, cliente_cpf, produto_id, quantidade, total)
+            QMessageBox.information(self, "Venda registrada", f"Total: {formatar_moeda(total)}")
             self._carregar_dados()
         except Exception as exc:
             QMessageBox.critical(self, "Erro ao registrar venda", str(exc))
 
-    def _exportar_minhas_vendas(self) -> None:
+    def _exportar_vendas(self) -> None:
         caminho, _ = QFileDialog.getSaveFileName(
             self, "Salvar como", f"vendas_{self._usuario.login}.xlsx", "Excel (*.xlsx)"
         )
@@ -159,8 +155,7 @@ class ColaboradorWindow(QMainWindow):
             todas = self._db.listar_vendas()
             minhas = [v for v in todas if v[1] == self._usuario.nome]
             exportar_excel(
-                caminho,
-                "Minhas Vendas",
+                caminho, "Minhas Vendas",
                 ["ID", "Vendedor", "Cliente CPF", "Produto", "Qtde", "Total", "Data"],
                 minhas,
             )
@@ -178,37 +173,39 @@ class _DialogNovaVenda(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Registrar Nova Venda")
-        self.setFixedSize(420, 280)
+        self.setFixedSize(440, 290)
         self._produtos = produtos
 
         layout = QFormLayout(self)
 
-        self._combo_produto = QComboBox()
+        self._combo_prod = QComboBox()
         for p in produtos:
-            self._combo_produto.addItem(
+            self._combo_prod.addItem(
                 f"[{p[1]}] {p[2]}  —  {formatar_moeda(float(p[3]))}  (estoque: {p[4]})",
-                userData=(p[0], float(p[3])),
+                userData=(p[0], float(p[3]), int(p[4])),
             )
-        self._combo_produto.currentIndexChanged.connect(self._atualizar_total)
-        layout.addRow("Produto:", self._combo_produto)
+        self._combo_prod.currentIndexChanged.connect(self._atualizar_total)
+        layout.addRow("Produto:", self._combo_prod)
 
         self._combo_cliente = QComboBox()
-        self._combo_cliente.addItem("— sem cliente —", userData="")
+        self._combo_cliente.addItem("— Venda avulsa (sem cadastro) —", userData="")
         for c in clientes:
-            self._combo_cliente.addItem(f"{c[2]} ({c[1]})", userData=c[1])
+            self._combo_cliente.addItem(f"{c[2]} — CPF: {c[1]}", userData=c[1])
         layout.addRow("Cliente:", self._combo_cliente)
 
-        self._spin_qtde = QSpinBox()
-        self._spin_qtde.setMinimum(1)
-        self._spin_qtde.setMaximum(9999)
-        self._spin_qtde.valueChanged.connect(self._atualizar_total)
-        layout.addRow("Quantidade:", self._spin_qtde)
+        self._spin = QSpinBox()
+        self._spin.setRange(1, 9999)
+        self._spin.valueChanged.connect(self._atualizar_total)
+        layout.addRow("Quantidade:", self._spin)
 
         self._lbl_total = QLabel("R$ 0,00")
-        self._lbl_total.setStyleSheet("font-size: 16px; font-weight: bold; color: #9F3FFA;")
+        self._lbl_total.setStyleSheet(
+            "font-size:18px; font-weight:bold; color:#9F3FFA; font-family:Montserrat;"
+        )
         layout.addRow("Total:", self._lbl_total)
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.button(QDialogButtonBox.Ok).setText("Confirmar Venda")
         botoes.accepted.connect(self._validar)
         botoes.rejected.connect(self.reject)
         layout.addRow(botoes)
@@ -216,31 +213,29 @@ class _DialogNovaVenda(QDialog):
         self._atualizar_total()
 
     def _atualizar_total(self) -> None:
-        dados = self._combo_produto.currentData()
-        if dados:
-            _, valor_unit = dados
-            total = valor_unit * self._spin_qtde.value()
-            self._lbl_total.setText(formatar_moeda(total))
+        dado = self._combo_prod.currentData()
+        if dado:
+            _, valor_unit, _ = dado
+            self._lbl_total.setText(formatar_moeda(valor_unit * self._spin.value()))
 
     def _validar(self) -> None:
-        dados = self._combo_produto.currentData()
-        if not dados:
+        dado = self._combo_prod.currentData()
+        if not dado:
             return
-        produto_id, valor_unit = dados
-        estoque = next(
-            (int(p[4]) for p in self._produtos if p[0] == produto_id), 0
-        )
-        if self._spin_qtde.value() > estoque:
+        _, _, estoque = dado
+        if self._spin.value() > estoque:
             QMessageBox.warning(
                 self, "Estoque insuficiente",
-                f"Estoque disponível: {estoque} unidade(s)."
+                f"Estoque disponível: {estoque} unidade(s).",
             )
             return
         self.accept()
 
     def dados(self) -> tuple[int, str, int, float]:
-        produto_id, valor_unit = self._combo_produto.currentData()
-        cliente_cpf = self._combo_cliente.currentData() or ""
-        quantidade = self._spin_qtde.value()
-        total = valor_unit * quantidade
-        return produto_id, cliente_cpf, quantidade, total
+        produto_id, valor_unit, _ = self._combo_prod.currentData()
+        return (
+            produto_id,
+            self._combo_cliente.currentData() or "",
+            self._spin.value(),
+            valor_unit * self._spin.value(),
+        )
